@@ -45,12 +45,13 @@ def main():
 
     conf_file = sys.argv[1]
 
-    # Apply standard FHS paths
+    # Apply standard FHS paths and systemd supervision
     patch_directive(conf_file, "dir", "/var/lib/kvrocks")
     patch_directive(conf_file, "log-dir", "/var/log/kvrocks")
     patch_directive(conf_file, "daemonize", "no")
+    patch_directive(conf_file, "supervised", "systemd")
 
-    print(f"Successfully patched {conf_file} with FHS directories.")
+    print(f"Successfully patched {conf_file} with FHS directories and systemd supervision.")
 
 
 if __name__ == "__main__":
