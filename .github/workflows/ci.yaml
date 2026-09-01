@@ -7,7 +7,6 @@ on:
         description: 'Apache Kvrocks version to build (e.g. 2.15.0)'
         type: string
         required: true
-        default: '2.15.0'
       iteration:
         description: 'Package iteration/revision number'
         type: string
@@ -90,6 +89,11 @@ jobs:
               VERSION="$REF"
               ITERATION="1"
             fi
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version must be explicitly provided!"
+            exit 1
           fi
 
           echo "VERSION=$VERSION" >> $GITHUB_ENV
@@ -206,6 +210,11 @@ jobs:
               VERSION="$REF"
               ITERATION="1"
             fi
+          fi
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version must be explicitly provided!"
+            exit 1
           fi
 
           echo "RELEASE_TAG=v${VERSION}-${ITERATION}" >> $GITHUB_ENV
