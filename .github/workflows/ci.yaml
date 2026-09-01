@@ -240,3 +240,57 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout gh-pages for APT Repo History
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: apt-repo-existing
+
+      - name: Build Debian APT Repository
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+          mkdir -p apt-repo/pool/main
+          mkdir -p apt-repo/dists/stable/main/binary-amd64
+          mkdir -p apt-repo/dists/stable/main/binary-arm64
+
+          # Preserve existing debs if available
+          if [ -d apt-repo-existing/pool/main ]; then
+            cp -n apt-repo-existing/pool/main/*.deb apt-repo/pool/main/ 2>/dev/null || true
+          fi
+
+          # Copy newly built deb packages
+          cp dist/*.deb apt-repo/pool/main/
+
+          # Copy installer script to root
+          cp scripts/install.sh apt-repo/install.sh
+
+          # Scan packages and generate index files
+          cd apt-repo
+          dpkg-scanpackages --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
+          gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+
+          dpkg-scanpackages --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
+          gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
+
+          # Generate Release metadata
+          cd dists/stable
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
+            -o APT::FTPArchive::Release::Label="Kvrocks" \
+            -o APT::FTPArchive::Release::Suite="stable" \
+            -o APT::FTPArchive::Release::Codename="stable" \
+            -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+            -o APT::FTPArchive::Release::Components="main" \
+            -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository" \
+            release . > Release
+          cd ../..
+
+      - name: Deploy APT Repository to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apt-repo

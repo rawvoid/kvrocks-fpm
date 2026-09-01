@@ -9,7 +9,9 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **Multi-Architecture Support**: Native packages for both `x86_64` (`amd64`) and `aarch64` (`arm64`).
 - **CPU Microarchitecture Optimization**:
   - **Standard (`generic`)**: Baseline compatibility with all `x86_64` CPUs (`PORTABLE=1`).
-  - **Optimized (`v3`)**: Compiled with `-march=x86-64-v3 -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2) for modern servers (~15-30% higher RocksDB throughput).
+  - **Optimized (`avx2`)**: Compiled with `-march=x86-64-v3 -mpclmul -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2, PCLMUL) for modern servers (~15-30% higher RocksDB throughput).
+- **Debian / Ubuntu APT Repository**: Hosted on GitHub Pages with automated index updates and version management.
+- **CPU-Aware One-Click Installer**: Automatically detects host CPU instruction sets (AVX2/BMI2) and installs the optimal package.
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
@@ -22,32 +24,68 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 | Package Name Pattern | Architecture | Target / CPU | Description |
 | :--- | :--- | :--- | :--- |
 | `kvrocks_<ver>-<iter>_amd64.deb`<br>`kvrocks-<ver>-<iter>.x86_64.rpm` | `x86_64` | `generic` | Baseline x86-64, maximum compatibility across all machines. |
-| `kvrocks-v3_<ver>-<iter>_amd64.deb`<br>`kvrocks-v3-<ver>-<iter>.x86_64.rpm` | `x86_64` | `x86-64-v3` | Optimized for modern servers (Intel Haswell+, AMD Zen+). |
+| `kvrocks-avx2_<ver>-<iter>_amd64.deb`<br>`kvrocks-avx2-<ver>-<iter>.x86_64.rpm` | `x86_64` | `avx2` (x86-64-v3) | Optimized for modern servers (Intel Haswell+, AMD Zen+). |
 | `kvrocks_<ver>-<iter>_arm64.deb`<br>`kvrocks-<ver>-<iter>.aarch64.rpm` | `aarch64` | `generic` | 64-bit ARM (AWS Graviton, Aliyun/Tencent ARM, Kunpeng, etc.). |
 
 ---
 
 ## 🚀 Installation & Usage
 
-### 1. Debian / Ubuntu (`.deb`)
+### 1. One-Click Automated Install (Debian / Ubuntu)
 
+The installer automatically detects your CPU capabilities (AVX2/BMI2) and architecture, configures the APT repository, and installs the fastest compatible variant:
+
+```bash
+curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
+```
+
+---
+
+### 2. Debian / Ubuntu APT Repository (Manual Setup)
+
+#### Step 1: Add the APT Repository
+```bash
+echo "deb [trusted=yes] https://rawvoid.github.io/kvrocks-fpm stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list
+sudo apt-get update
+```
+
+#### Step 2: Install Target Package
+
+* **Standard / ARM64 installation**:
+  ```bash
+  sudo apt-get install -y kvrocks
+  ```
+
+* **Optimized AVX2 installation** (for modern x86_64 servers with AVX2 & BMI2):
+  ```bash
+  sudo apt-get install -y kvrocks-avx2
+  ```
+
+*(Note: `kvrocks` and `kvrocks-avx2` provide mutual conflict and replace rules, allowing seamless switching without orphaned files.)*
+
+---
+
+### 3. Manual Package Installation (`.deb` / `.rpm`)
+
+#### Debian / Ubuntu (`.deb`)
 ```bash
 # Install generic x86_64 or arm64 package
 sudo dpkg -i kvrocks_<version>-<iteration>_amd64.deb
-# Or install optimized v3 package (for modern x86_64 servers)
-sudo dpkg -i kvrocks-v3_<version>-<iteration>_amd64.deb
 
-# Fix missing dependencies if any
+# Or install optimized avx2 package (for modern x86_64 servers)
+sudo dpkg -i kvrocks-avx2_<version>-<iteration>_amd64.deb
+
+# Fix missing dependencies if needed
 sudo apt-get install -f
 ```
 
-### 2. RHEL / CentOS / Rocky Linux / Fedora (`.rpm`)
-
+#### RHEL / CentOS / Rocky Linux / Fedora (`.rpm`)
 ```bash
-# Install via dnf / yum / rpm
+# Install generic package
 sudo dnf install ./kvrocks-<version>-<iteration>.x86_64.rpm
-# Or install optimized v3 package
-sudo dnf install ./kvrocks-v3-<version>-<iteration>.x86_64.rpm
+
+# Or install optimized avx2 package
+sudo dnf install ./kvrocks-avx2-<version>-<iteration>.x86_64.rpm
 ```
 
 ---
