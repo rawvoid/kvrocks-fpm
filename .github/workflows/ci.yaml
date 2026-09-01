@@ -3,19 +3,21 @@ name: Release Packages
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: 'Apache Kvrocks version to build (e.g. 2.15.0)'
+        type: string
+        required: true
+        default: '2.15.0'
+      iteration:
+        description: 'Package iteration/revision number'
+        type: string
+        required: true
+        default: '1'
       publish_release:
         description: 'Publish release to GitHub Releases'
         type: boolean
         required: true
         default: true
-      custom_version:
-        description: 'Custom version override (optional, defaults to VERSION file)'
-        type: string
-        required: false
-      custom_iteration:
-        description: 'Custom iteration override (optional, defaults to ITERATION file)'
-        type: string
-        required: false
   push:
     tags:
       - 'v*'
@@ -75,13 +77,24 @@ jobs:
 
       - name: Resolve Version & Iteration
         run: |
-          VERSION="${{ inputs.custom_version }}"
-          [ -z "$VERSION" ] && VERSION="$(cat VERSION)"
-          ITERATION="${{ inputs.custom_iteration }}"
-          [ -z "$ITERATION" ] && ITERATION="$(cat ITERATION)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            ITERATION="${{ inputs.iteration }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            REF="${{ github.ref_name }}"
+            REF="${REF#v}"
+            if [[ "$REF" =~ ^([^-]+)-(.+)$ ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+              ITERATION="${BASH_REMATCH[2]}"
+            else
+              VERSION="$REF"
+              ITERATION="1"
+            fi
+          fi
 
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "ITERATION=$ITERATION" >> $GITHUB_ENV
+          echo "Resolved version: $VERSION, iteration: $ITERATION"
 
       - name: Build Kvrocks
         run: |
@@ -180,10 +193,20 @@ jobs:
 
       - name: Resolve Release Tag & Name
         run: |
-          VERSION="${{ inputs.custom_version }}"
-          [ -z "$VERSION" ] && VERSION="$(cat VERSION)"
-          ITERATION="${{ inputs.custom_iteration }}"
-          [ -z "$ITERATION" ] && ITERATION="$(cat ITERATION)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            ITERATION="${{ inputs.iteration }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            REF="${{ github.ref_name }}"
+            REF="${REF#v}"
+            if [[ "$REF" =~ ^([^-]+)-(.+)$ ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+              ITERATION="${BASH_REMATCH[2]}"
+            else
+              VERSION="$REF"
+              ITERATION="1"
+            fi
+          fi
 
           echo "RELEASE_TAG=v${VERSION}-${ITERATION}" >> $GITHUB_ENV
           echo "RELEASE_NAME=Kvrocks ${VERSION}-${ITERATION}" >> $GITHUB_ENV
