@@ -30,7 +30,7 @@ jobs:
       matrix:
         include:
           # Generic x86_64 build (maximum compatibility)
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             arch: amd64
             rpm_arch: x86_64
             cpu_target: generic
@@ -40,7 +40,7 @@ jobs:
             fpm_extra_args: "--conflicts kvrocks-avx2 --replaces kvrocks-avx2 --conflicts kvrocks-v3 --replaces kvrocks-v3"
 
           # Modern CPU optimized x86-64-v3 / AVX2 build (AVX, AVX2, BMI1/2, FMA, PCLMUL)
-          - os: ubuntu-24.04
+          - os: ubuntu-22.04
             arch: amd64
             rpm_arch: x86_64
             cpu_target: avx2
@@ -50,7 +50,7 @@ jobs:
             fpm_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks --conflicts kvrocks-v3 --replaces kvrocks-v3"
 
           # ARM64 / aarch64 build
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             arch: arm64
             rpm_arch: aarch64
             cpu_target: generic
@@ -66,7 +66,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y git build-essential cmake libtool python3 \
-                                  ruby ruby-dev rubygems rpm libssl-dev ccache
+                                  ruby-full ruby-dev rpm libssl-dev ccache binutils
           sudo gem install --no-document fpm
 
       - name: Setup ccache
@@ -107,6 +107,7 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           export CCACHE_DIR="$HOME/.cache/ccache"
+          export LDFLAGS="-static-libstdc++ -static-libgcc $LDFLAGS"
           if [ -n "${{ matrix.extra_flags }}" ]; then
             export CFLAGS="${{ matrix.extra_flags }}"
             export CXXFLAGS="${{ matrix.extra_flags }}"
@@ -115,9 +116,24 @@ jobs:
 
           git clone --depth 1 -b v${{ env.VERSION }} https://github.com/apache/kvrocks.git
           cd kvrocks
-          ./x.py build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }} -j $(nproc)
+          ./x.py build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" ${{ matrix.cmake_flags }} -j $(nproc)
           
           ccache -s
+
+      - name: Inspect Binary Linkage & Compatibility
+        run: |
+          echo "=== Dynamic library dependencies (ldd) ==="
+          ldd kvrocks/build/kvrocks || true
+          
+          echo "=== Check libstdc++ linkage ==="
+          if ldd kvrocks/build/kvrocks | grep -q "libstdc++"; then
+            echo "::warning::libstdc++ is dynamically linked!"
+          else
+            echo "Verified: libstdc++ is statically linked."
+          fi
+
+          echo "=== Glibc symbols required by kvrocks ==="
+          objdump -p kvrocks/build/kvrocks | grep -A 10 "required from libc.so" || true
 
       - name: Prepare Packaging RootFS
         run: |
