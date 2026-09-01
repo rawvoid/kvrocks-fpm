@@ -132,11 +132,12 @@ jobs:
           cp kvrocks/build/kvrocks rootfs/usr/bin/
           cp kvrocks/build/kvrocks2redis rootfs/usr/bin/
 
-          # Configuration
+          # Configuration with FHS paths
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
+          python3 scripts/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
 
-          # Systemd service unit
-          cp kvrocks/utils/systemd/kvrocks.service rootfs/usr/lib/systemd/system/
+          # Systemd service unit (production-ready with FHS paths)
+          cp scripts/kvrocks.service rootfs/usr/lib/systemd/system/
 
           # License & Notice
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
