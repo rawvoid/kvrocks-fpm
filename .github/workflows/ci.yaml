@@ -37,15 +37,17 @@ jobs:
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: ""
             pkg_suffix: ""
+            fpm_extra_args: "--conflicts kvrocks-avx2 --replaces kvrocks-avx2 --conflicts kvrocks-v3 --replaces kvrocks-v3"
 
-          # Modern CPU optimized x86-64-v3 build (AVX2, BMI2, FMA, PCLMUL)
+          # Modern CPU optimized x86-64-v3 / AVX2 build (AVX, AVX2, BMI1/2, FMA, PCLMUL)
           - os: ubuntu-24.04
             arch: amd64
             rpm_arch: x86_64
-            cpu_target: v3
+            cpu_target: avx2
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
-            pkg_suffix: "-v3"
+            pkg_suffix: "-avx2"
+            fpm_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks --conflicts kvrocks-v3 --replaces kvrocks-v3"
 
           # ARM64 / aarch64 build
           - os: ubuntu-24.04-arm
@@ -55,6 +57,7 @@ jobs:
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: ""
             pkg_suffix: ""
+            fpm_extra_args: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -152,6 +155,7 @@ jobs:
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
             --url 'https://kvrocks.apache.org' \
             --license 'Apache-2.0' \
+            ${{ matrix.fpm_extra_args }} \
             -p "kvrocks${{ matrix.pkg_suffix }}_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.deb"
 
       - name: Package RPM
@@ -168,6 +172,7 @@ jobs:
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
             --url 'https://kvrocks.apache.org' \
             --license 'Apache-2.0' \
+            ${{ matrix.fpm_extra_args }} \
             -p "kvrocks${{ matrix.pkg_suffix }}-${{ env.VERSION }}-${{ env.ITERATION }}.${{ matrix.rpm_arch }}.rpm"
 
       - name: Upload Build Artifacts
