@@ -8,8 +8,8 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 
 - **Multi-Architecture Support**: Native packages for both `x86_64` (`amd64`) and `aarch64` (`arm64`).
 - **CPU Microarchitecture Optimization**:
-  - **Standard (`generic`)**: Baseline compatibility with all `x86_64` CPUs (`PORTABLE=1`).
-  - **Optimized (`avx2`)**: Compiled with `-march=x86-64-v3 -mpclmul -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2, PCLMUL) for modern servers (~15-30% higher RocksDB throughput).
+  - **Performance Default (`x86-64-v3`)**: Compiled with `-march=x86-64-v3 -mpclmul -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2, PCLMUL) for modern servers (~15-30% higher RocksDB throughput).
+  - **Compatibility (`legacy`)**: Baseline `x86-64-v1` compatibility (`PORTABLE=1`) for older CPUs/VMs without AVX2.
 - **Debian / Ubuntu APT Repository**: Hosted on GitHub Pages with automated index updates and version management.
 - **CPU-Aware One-Click Installer**: Automatically detects host CPU instruction sets (AVX2/BMI2) and installs the optimal package.
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
@@ -23,8 +23,8 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 
 | Package Name Pattern | Architecture | Target / CPU | Description |
 | :--- | :--- | :--- | :--- |
-| `kvrocks_<ver>-<iter>_amd64.deb`<br>`kvrocks-<ver>-<iter>.x86_64.rpm` | `x86_64` | `generic` | Baseline x86-64, maximum compatibility across all machines. |
-| `kvrocks-avx2_<ver>-<iter>_amd64.deb`<br>`kvrocks-avx2-<ver>-<iter>.x86_64.rpm` | `x86_64` | `avx2` (x86-64-v3) | Optimized for modern servers (Intel Haswell+, AMD Zen+). |
+| `kvrocks_<ver>-<iter>_amd64.deb`<br>`kvrocks-<ver>-<iter>.x86_64.rpm` | `x86_64` | `x86-64-v3` (AVX2) | **Default** - Optimized for modern servers (Intel Haswell+, AMD Zen+). |
+| `kvrocks-legacy_<ver>-<iter>_amd64.deb`<br>`kvrocks-legacy-<ver>-<iter>.x86_64.rpm` | `x86_64` | `legacy` (x86-64-v1) | Baseline compatibility for older CPUs/VMs without AVX2. |
 | `kvrocks_<ver>-<iter>_arm64.deb`<br>`kvrocks-<ver>-<iter>.aarch64.rpm` | `aarch64` | `generic` | 64-bit ARM (AWS Graviton, Aliyun/Tencent ARM, Kunpeng, etc.). |
 
 ---
@@ -51,17 +51,17 @@ sudo apt-get update
 
 #### Step 2: Install Target Package
 
-* **Standard / ARM64 installation**:
+* **Standard / Modern x86_64 & ARM64 installation** (Default with AVX2/v3 on x86_64):
   ```bash
   sudo apt-get install -y kvrocks
   ```
 
-* **Optimized AVX2 installation** (for modern x86_64 servers with AVX2 & BMI2):
+* **Legacy installation** (for older x86_64 machines without AVX2):
   ```bash
-  sudo apt-get install -y kvrocks-avx2
+  sudo apt-get install -y kvrocks-legacy
   ```
 
-*(Note: `kvrocks` and `kvrocks-avx2` provide mutual conflict and replace rules, allowing seamless switching without orphaned files.)*
+*(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files.)*
 
 ---
 
@@ -69,11 +69,11 @@ sudo apt-get update
 
 #### Debian / Ubuntu (`.deb`)
 ```bash
-# Install generic x86_64 or arm64 package
+# Install modern performance package (x86_64 default) or arm64
 sudo dpkg -i kvrocks_<version>-<iteration>_amd64.deb
 
-# Or install optimized avx2 package (for modern x86_64 servers)
-sudo dpkg -i kvrocks-avx2_<version>-<iteration>_amd64.deb
+# Or install legacy compatibility package (for older CPUs without AVX2)
+sudo dpkg -i kvrocks-legacy_<version>-<iteration>_amd64.deb
 
 # Fix missing dependencies if needed
 sudo apt-get install -f
@@ -81,11 +81,11 @@ sudo apt-get install -f
 
 #### RHEL / CentOS / Rocky Linux / Fedora (`.rpm`)
 ```bash
-# Install generic package
+# Install modern performance package (x86_64 default)
 sudo dnf install ./kvrocks-<version>-<iteration>.x86_64.rpm
 
-# Or install optimized avx2 package
-sudo dnf install ./kvrocks-avx2-<version>-<iteration>.x86_64.rpm
+# Or install legacy compatibility package
+sudo dnf install ./kvrocks-legacy-<version>-<iteration>.x86_64.rpm
 ```
 
 ---

@@ -96,25 +96,28 @@ case "$RAW_ARCH" in
 esac
 
 TARGET_PACKAGE="kvrocks"
-CPU_DETAIL="Generic / Baseline"
+CPU_DETAIL="Standard (aarch64)"
 
 if [ "$ARCH" = "amd64" ]; then
-    # Detect AVX2 and BMI2 support from /proc/cpuinfo
+    # Check if host CPU supports x86-64-v3 (AVX2 and BMI2)
     if grep -qE "(^|\s)avx2(\s|$)" /proc/cpuinfo 2>/dev/null && \
        grep -qE "(^|\s)bmi2(\s|$)" /proc/cpuinfo 2>/dev/null; then
-        TARGET_PACKAGE="kvrocks-avx2"
-        CPU_DETAIL="Optimized (AVX2, BMI2, x86-64-v3)"
+        TARGET_PACKAGE="kvrocks"
+        CPU_DETAIL="Optimized (x86-64-v3 / AVX2 & BMI2)"
+    else
+        TARGET_PACKAGE="kvrocks-legacy"
+        CPU_DETAIL="Legacy / Compatibility (x86-64-v1, no AVX2/BMI2)"
     fi
 fi
 
-# Allow environment override: e.g. KVROCKS_FLAVOR=generic or KVROCKS_FLAVOR=avx2
+# Allow environment override: e.g. KVROCKS_FLAVOR=legacy or KVROCKS_FLAVOR=default
 if [ -n "${KVROCKS_FLAVOR:-}" ]; then
-    if [ "${KVROCKS_FLAVOR}" = "generic" ]; then
+    if [ "${KVROCKS_FLAVOR}" = "legacy" ] || [ "${KVROCKS_FLAVOR}" = "generic" ] || [ "${KVROCKS_FLAVOR}" = "v1" ]; then
+        TARGET_PACKAGE="kvrocks-legacy"
+        CPU_DETAIL="Forced Legacy by KVROCKS_FLAVOR"
+    elif [ "${KVROCKS_FLAVOR}" = "default" ] || [ "${KVROCKS_FLAVOR}" = "v3" ] || [ "${KVROCKS_FLAVOR}" = "avx2" ]; then
         TARGET_PACKAGE="kvrocks"
-        CPU_DETAIL="Forced Generic by KVROCKS_FLAVOR"
-    elif [ "${KVROCKS_FLAVOR}" = "avx2" ]; then
-        TARGET_PACKAGE="kvrocks-avx2"
-        CPU_DETAIL="Forced AVX2 by KVROCKS_FLAVOR"
+        CPU_DETAIL="Forced Default (v3) by KVROCKS_FLAVOR"
     fi
 fi
 

@@ -29,25 +29,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Generic x86_64 build (maximum compatibility)
+          # Modern CPU optimized x86-64-v3 build (AVX, AVX2, BMI1/2, FMA, PCLMUL - Default Performance package)
           - os: ubuntu-22.04
             arch: amd64
             rpm_arch: x86_64
-            cpu_target: generic
-            cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
-            extra_flags: ""
-            pkg_suffix: ""
-            fpm_extra_args: "--conflicts kvrocks-avx2 --replaces kvrocks-avx2 --conflicts kvrocks-v3 --replaces kvrocks-v3"
-
-          # Modern CPU optimized x86-64-v3 / AVX2 build (AVX, AVX2, BMI1/2, FMA, PCLMUL)
-          - os: ubuntu-22.04
-            arch: amd64
-            rpm_arch: x86_64
-            cpu_target: avx2
+            cpu_target: v3
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
-            pkg_suffix: "-avx2"
-            fpm_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks --conflicts kvrocks-v3 --replaces kvrocks-v3"
+            pkg_suffix: ""
+            fpm_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy --conflicts kvrocks-avx2 --replaces kvrocks-avx2"
+
+          # Legacy x86-64-v1 build (Baseline compatibility for older CPUs/VMs without AVX2)
+          - os: ubuntu-22.04
+            arch: amd64
+            rpm_arch: x86_64
+            cpu_target: legacy
+            cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
+            extra_flags: ""
+            pkg_suffix: "-legacy"
+            fpm_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks --conflicts kvrocks-avx2 --replaces kvrocks-avx2"
 
           # ARM64 / aarch64 build
           - os: ubuntu-22.04-arm
