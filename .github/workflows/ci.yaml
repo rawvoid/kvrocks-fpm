@@ -37,7 +37,7 @@ jobs:
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
             pkg_suffix: ""
-            fpm_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy --conflicts kvrocks-avx2 --replaces kvrocks-avx2"
+            fpm_extra_args: "--provides kvrocks-avx2 --conflicts kvrocks-legacy --replaces kvrocks-legacy --conflicts kvrocks-avx2 --replaces kvrocks-avx2"
 
           # Legacy x86-64-v1 build (Baseline compatibility for older CPUs/VMs without AVX2)
           - os: ubuntu-22.04
