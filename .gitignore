@@ -9,3 +9,7 @@ kvrocks/
 *.tar.gz
 *.tar.xz
 SHA256SUMS
+
+# IDE & OS metadata
+.DS_Store
+.idea/
