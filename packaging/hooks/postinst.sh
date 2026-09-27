@@ -35,9 +35,10 @@ if [ -e "$conf" ] || [ -L "$conf" ]; then
     chmod 640 "$conf"
 fi
 
-# Reload systemd daemon if available
+# Reload systemd daemon if available, and try-restart service if it was running
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl try-restart kvrocks >/dev/null 2>&1 || true
 fi
 
 exit 0

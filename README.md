@@ -61,7 +61,7 @@ sudo apt-get update
   sudo apt-get install -y kvrocks-legacy
   ```
 
-*(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files. Switching flavors will preserve your service registration; run `sudo systemctl restart kvrocks` afterwards to transition the running process to the new binary.)*
+*(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files. Upgrades and flavor switches automatically restart the service if it is currently running, and preserve the inactive state if it is stopped.)*
 
 ---
 
