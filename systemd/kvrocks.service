@@ -13,8 +13,12 @@ ExecStart=/usr/bin/kvrocks -c /etc/kvrocks/kvrocks.conf
 Restart=on-failure
 RestartSec=10s
 LimitNOFILE=100000
-LimitNPROC=4096
-TimeoutSec=300
+TasksMax=1024
+TimeoutStopSec=300s
+StateDirectory=kvrocks
+StateDirectoryMode=0750
+LogsDirectory=kvrocks
+LogsDirectoryMode=0750
 NoNewPrivileges=yes
 UMask=0027
 
