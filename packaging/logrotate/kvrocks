@@ -1,0 +1,12 @@
+/var/log/kvrocks/*.log.* {
+    daily
+    rotate 30
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    olddir archive
+    createolddir 0750 kvrocks kvrocks
+    su kvrocks kvrocks
+}

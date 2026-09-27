@@ -15,6 +15,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
+- **Production Log Management**: Built-in `/etc/logrotate.d/kvrocks` configuration for automated daily rotation, gzip compression, and 30-day retention.
 - **Automated Checksums**: Every release includes `SHA256SUMS` for integrity verification.
 
 ---
@@ -107,8 +108,11 @@ sudo systemctl enable kvrocks
 # Check status
 sudo systemctl status kvrocks
 
-# View logs
+# View systemd service lifecycle
 sudo journalctl -u kvrocks -f
+
+# View live database engine logs
+sudo tail -f /var/log/kvrocks/kvrocks.INFO
 ```
 
 Test connection using `redis-cli`:
@@ -126,9 +130,10 @@ redis-cli -p 6666 ping
 | `/usr/bin/kvrocks` | Main Kvrocks server binary |
 | `/usr/bin/kvrocks2redis` | Data migration utility to sync Kvrocks to Redis |
 | `/etc/kvrocks/kvrocks.conf` | Configuration file (protected during package upgrades) |
+| `/etc/logrotate.d/kvrocks` | Logrotate policy (daily rotation, gzip compression, 30-day retention) |
 | `/usr/lib/systemd/system/kvrocks.service` | Systemd service unit |
 | `/var/lib/kvrocks/` | Working & database storage directory (owned by `kvrocks:kvrocks`) |
-| `/var/log/kvrocks/` | Server log directory (owned by `kvrocks:kvrocks`) |
+| `/var/log/kvrocks/` | Server log directory & `archive/` (owned by `kvrocks:kvrocks`) |
 | `/usr/share/doc/kvrocks/` | License and Notice documentation |
 
 ---

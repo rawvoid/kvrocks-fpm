@@ -156,6 +156,7 @@ jobs:
         run: |
           mkdir -p rootfs/usr/bin
           mkdir -p rootfs/etc/kvrocks
+          mkdir -p rootfs/etc/logrotate.d
           mkdir -p rootfs/usr/lib/systemd/system
           mkdir -p rootfs/var/lib/kvrocks
           mkdir -p rootfs/var/log/kvrocks
@@ -168,6 +169,10 @@ jobs:
           # Configuration with FHS paths
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
           python3 packaging/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
+
+          # Logrotate configuration
+          cp packaging/logrotate/kvrocks rootfs/etc/logrotate.d/kvrocks
+          chmod 0644 rootfs/etc/logrotate.d/kvrocks
 
           # Systemd service unit (production-ready with FHS paths)
           cp systemd/kvrocks.service rootfs/usr/lib/systemd/system/
@@ -185,6 +190,7 @@ jobs:
             -d "libssl3" \
             -C rootfs \
             --config-files /etc/kvrocks/kvrocks.conf \
+            --config-files /etc/logrotate.d/kvrocks \
             --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \
@@ -203,6 +209,7 @@ jobs:
             -a "${{ matrix.rpm_arch }}" \
             -C rootfs \
             --config-files /etc/kvrocks/kvrocks.conf \
+            --config-files /etc/logrotate.d/kvrocks \
             --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \
