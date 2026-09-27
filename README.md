@@ -79,7 +79,10 @@ sudo dpkg -i kvrocks-legacy_<version>-<iteration>_amd64.deb
 sudo apt-get install -f
 ```
 
-#### RHEL / CentOS / Rocky Linux / Fedora (`.rpm`)
+#### Fedora / Modern RPM Systems (`.rpm`)
+
+> **Note**: RPM packages are built on modern Linux environments requiring Glibc 2.35+. Recommended for Fedora 36+, Amazon Linux 2023, openSUSE, etc.
+
 ```bash
 # Install modern performance package (x86_64 default)
 sudo dnf install ./kvrocks-<version>-<iteration>.x86_64.rpm
