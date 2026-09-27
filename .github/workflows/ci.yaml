@@ -142,7 +142,6 @@ jobs:
           mkdir -p rootfs/usr/bin
           mkdir -p rootfs/etc/kvrocks
           mkdir -p rootfs/etc/logrotate.d
-          mkdir -p rootfs/usr/lib/systemd/system
           mkdir -p rootfs/var/lib/kvrocks
           mkdir -p rootfs/var/log/kvrocks
           mkdir -p rootfs/usr/share/doc/kvrocks
@@ -158,9 +157,6 @@ jobs:
           # Logrotate configuration
           cp packaging/logrotate/kvrocks rootfs/etc/logrotate.d/kvrocks
           chmod 0644 rootfs/etc/logrotate.d/kvrocks
-
-          # Systemd service unit (production-ready with FHS paths)
-          cp systemd/kvrocks.service rootfs/usr/lib/systemd/system/
 
           # License & Notice
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
@@ -191,6 +187,10 @@ jobs:
 
       - name: Package DEB
         run: |
+          # Systemd service unit (Debian/Ubuntu standard path /lib/systemd/system)
+          mkdir -p rootfs/lib/systemd/system
+          cp systemd/kvrocks.service rootfs/lib/systemd/system/
+
           fpm -s dir -t deb \
             -n "kvrocks${{ matrix.pkg_suffix }}" \
             -v "${{ env.VERSION }}" \
@@ -211,8 +211,14 @@ jobs:
             ${{ matrix.fpm_extra_args }} \
             -p "kvrocks${{ matrix.pkg_suffix }}_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.deb"
 
+          rm -rf rootfs/lib
+
       - name: Package RPM
         run: |
+          # Systemd service unit (RHEL/CentOS standard path /usr/lib/systemd/system)
+          mkdir -p rootfs/usr/lib/systemd/system
+          cp systemd/kvrocks.service rootfs/usr/lib/systemd/system/
+
           fpm -s dir -t rpm \
             -n "kvrocks${{ matrix.pkg_suffix }}" \
             -v "${{ env.VERSION }}" \
@@ -233,6 +239,8 @@ jobs:
             --license 'Apache-2.0' \
             ${{ matrix.fpm_extra_args }} \
             -p "kvrocks${{ matrix.pkg_suffix }}-${{ env.VERSION }}-${{ env.ITERATION }}.${{ matrix.rpm_arch }}.rpm"
+
+          rm -rf rootfs/usr/lib/systemd
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4

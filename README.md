@@ -136,7 +136,7 @@ redis-cli -p 6666 ping
 | `/usr/bin/kvrocks2redis` | Data migration utility to sync Kvrocks to Redis |
 | `/etc/kvrocks/kvrocks.conf` | Configuration file (protected during package upgrades) |
 | `/etc/logrotate.d/kvrocks` | Logrotate policy (daily rotation, gzip compression, 30-day retention) |
-| `/usr/lib/systemd/system/kvrocks.service` | Systemd service unit |
+| `/lib/systemd/system/kvrocks.service` (DEB) / `/usr/lib/systemd/system/kvrocks.service` (RPM) | Systemd service unit |
 | `/var/lib/kvrocks/` | Working & database storage directory (owned by `kvrocks:kvrocks`) |
 | `/var/log/kvrocks/` | Server log directory & `archive/` (owned by `kvrocks:kvrocks`) |
 | `/usr/share/doc/kvrocks/` | License and Notice documentation |
