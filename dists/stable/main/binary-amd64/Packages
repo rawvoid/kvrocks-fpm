@@ -18,6 +18,26 @@ Description: A distributed key value NoSQL database that uses RocksDB as storage
 License: Apache-2.0
 Vendor: none
 
+Package: kvrocks
+Version: 2.11.1-1
+Architecture: amd64
+Maintainer: <runner@runnervm3p1d5>
+Installed-Size: 54023
+Depends: libssl3
+Conflicts: kvrocks-legacy
+Replaces: kvrocks-legacy
+Filename: pool/main/kvrocks_2.11.1-1_amd64.deb
+Size: 20293512
+MD5sum: 26d7fe5433cc4993a77bcc218b2e4e96
+SHA1: bbcd96744bfc1ee30544c8a7577d6b3104c9ad24
+SHA256: 359a1c34fa82c42823b011bca66671911b87dff901ab6e12caca8b25509660df
+Section: default
+Priority: optional
+Homepage: https://kvrocks.apache.org
+Description: A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol
+License: Apache-2.0
+Vendor: none
+
 Package: kvrocks-legacy
 Version: 2.10.1-1
 Architecture: amd64
@@ -32,6 +52,27 @@ Size: 19189854
 MD5sum: 2d57c7361ec9d52421e1bbb8509aff1a
 SHA1: de40183f78803bed2dd05fe617ced1b242c70765
 SHA256: 9f838b009888cc4701890796901d1c27bfb9b870a0a3cfaec17657f65efea2fd
+Section: default
+Priority: optional
+Homepage: https://kvrocks.apache.org
+Description: A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol
+License: Apache-2.0
+Vendor: none
+
+Package: kvrocks-legacy
+Version: 2.11.1-1
+Architecture: amd64
+Maintainer: <runner@runnervm3p1d5>
+Installed-Size: 53605
+Depends: libssl3
+Conflicts: kvrocks
+Replaces: kvrocks
+Provides: kvrocks
+Filename: pool/main/kvrocks-legacy_2.11.1-1_amd64.deb
+Size: 20064690
+MD5sum: 643cd1c4560dce44d4569401520b5393
+SHA1: 759cf0ac515e5219344a1fac126313502f873a94
+SHA256: 7243f3f5fd19fdaa58a7ed1f2693516472da319d133eaf9965513d6147d91218
 Section: default
 Priority: optional
 Homepage: https://kvrocks.apache.org
