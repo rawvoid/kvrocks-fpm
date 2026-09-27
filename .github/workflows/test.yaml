@@ -24,7 +24,6 @@ jobs:
 
       - name: Run Shellcheck
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck scripts/install.sh packaging/hooks/*.sh
 
       - name: Validate Shell Script Syntax

@@ -5,7 +5,10 @@ set -e
 # so obsolete old package's %preun does not disable or stop the service.
 case "$1" in
     ''|*[!0-9]*) ;;
-    *) mkdir -p /run && touch /run/kvrocks.dont-disable 2>/dev/null || true ;;
+    *)
+        mkdir -p /run 2>/dev/null || true
+        touch /run/kvrocks.dont-disable 2>/dev/null || true
+        ;;
 esac
 
 # Create kvrocks group if it doesn't exist
