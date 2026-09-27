@@ -1,4 +1,4 @@
-/var/log/kvrocks/*.log.* {
+/var/log/kvrocks/*.log /var/log/kvrocks/*.log.* {
     daily
     rotate 30
     missingok
@@ -9,4 +9,8 @@
     olddir archive
     createolddir 0750 kvrocks kvrocks
     su kvrocks kvrocks
+    sharedscripts
+    postrotate
+        find /var/log/kvrocks -maxdepth 1 -name "*.log.*" -type f -size 0 -mmin +60 -delete 2>/dev/null || true
+    endscript
 }
