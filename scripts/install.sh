@@ -110,9 +110,17 @@ if [ "$ARCH" = "amd64" ]; then
     fi
 fi
 
-# Allow environment override: e.g. KVROCKS_FLAVOR=legacy or KVROCKS_FLAVOR=default
+# Allow environment override: e.g. KVROCKS_FLAVOR=legacy, generic, or default
 if [ -n "${KVROCKS_FLAVOR:-}" ]; then
-    if [ "${KVROCKS_FLAVOR}" = "legacy" ] || [ "${KVROCKS_FLAVOR}" = "generic" ] || [ "${KVROCKS_FLAVOR}" = "v1" ]; then
+    if [ "${KVROCKS_FLAVOR}" = "generic" ]; then
+        if [ "$ARCH" = "arm64" ]; then
+            TARGET_PACKAGE="kvrocks"
+            CPU_DETAIL="Standard (aarch64)"
+        else
+            TARGET_PACKAGE="kvrocks-legacy"
+            CPU_DETAIL="Forced Legacy (generic) by KVROCKS_FLAVOR"
+        fi
+    elif [ "${KVROCKS_FLAVOR}" = "legacy" ] || [ "${KVROCKS_FLAVOR}" = "v1" ]; then
         if [ "$ARCH" = "arm64" ]; then
             warn "Legacy flavor is only available for amd64 architecture. Using default kvrocks package for arm64."
             TARGET_PACKAGE="kvrocks"
