@@ -16,6 +16,7 @@ LimitNOFILE=100000
 LimitNPROC=4096
 TimeoutSec=300
 NoNewPrivileges=yes
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target
