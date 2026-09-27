@@ -61,7 +61,7 @@ sudo apt-get update
   sudo apt-get install -y kvrocks-legacy
   ```
 
-*(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files.)*
+*(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files. Switching flavors will preserve your service registration; run `sudo systemctl restart kvrocks` afterwards to transition the running process to the new binary.)*
 
 ---
 
@@ -79,9 +79,9 @@ sudo dpkg -i kvrocks-legacy_<version>-<iteration>_amd64.deb
 sudo apt-get install -f
 ```
 
-#### Fedora / Modern RPM Systems (`.rpm`)
+#### RedHat / Fedora / RPM Systems (`.rpm`)
 
-> **Note**: RPM packages are built on modern Linux environments requiring Glibc 2.35+. Recommended for Fedora 36+, Amazon Linux 2023, openSUSE, etc.
+> **Note**: Packages are built on Ubuntu 22.04 (Glibc 2.35, OpenSSL 3). Target systems must satisfy the highest `GLIBC_` symbol version recorded in each release's `glibc-symbols.txt` asset, and provide OpenSSL 3 runtime (`libssl3` for deb, `libssl.so.3` for rpm).
 
 ```bash
 # Install modern performance package (x86_64 default)

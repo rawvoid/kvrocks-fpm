@@ -101,6 +101,16 @@ jobs:
             exit 1
           fi
 
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Version must match semantic versioning format (e.g. 2.15.0)!"
+            exit 1
+          fi
+
+          if ! echo "$ITERATION" | grep -Eq '^[0-9A-Za-z.+~]+$'; then
+            echo "::error::Iteration must be a valid package revision token (e.g. 1)!"
+            exit 1
+          fi
+
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "ITERATION=$ITERATION" >> $GITHUB_ENV
           echo "Resolved version: $VERSION, iteration: $ITERATION"
@@ -135,7 +145,12 @@ jobs:
           fi
 
           echo "=== Glibc symbols required by kvrocks ==="
-          objdump -p kvrocks/build/kvrocks | grep -A 10 "required from libc.so" || true
+          objdump -T kvrocks/build/kvrocks | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu > glibc-symbols.txt || true
+          MAX_GLIBC=$(tail -n 1 glibc-symbols.txt 2>/dev/null || echo "unknown")
+          echo "Max GLIBC symbol required: ${MAX_GLIBC}"
+          cat glibc-symbols.txt || true
+          echo "### Binary Compatibility (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
+          echo "- Highest GLIBC symbol required: \`${MAX_GLIBC}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Prepare Packaging RootFS
         run: |
@@ -191,6 +206,7 @@ jobs:
             --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \
+            --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
             --url 'https://kvrocks.apache.org' \
             --license 'Apache-2.0' \
@@ -204,6 +220,7 @@ jobs:
           path: |
             *.deb
             *.rpm
+            glibc-symbols.txt
           if-no-files-found: error
 
   publish-release:
@@ -243,6 +260,16 @@ jobs:
 
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
+            exit 1
+          fi
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Version must match semantic versioning format (e.g. 2.15.0)!"
+            exit 1
+          fi
+
+          if ! echo "$ITERATION" | grep -Eq '^[0-9A-Za-z.+~]+$'; then
+            echo "::error::Iteration must be a valid package revision token (e.g. 1)!"
             exit 1
           fi
 
