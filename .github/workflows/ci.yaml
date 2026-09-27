@@ -145,10 +145,10 @@ jobs:
           fi
 
           echo "=== Glibc symbols required by kvrocks ==="
-          objdump -T kvrocks/build/kvrocks | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu > glibc-symbols.txt || true
-          MAX_GLIBC=$(tail -n 1 glibc-symbols.txt 2>/dev/null || echo "unknown")
+          objdump -T kvrocks/build/kvrocks | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu > "glibc-symbols-${{ matrix.arch }}-${{ matrix.cpu_target }}.txt" || true
+          MAX_GLIBC=$(tail -n 1 "glibc-symbols-${{ matrix.arch }}-${{ matrix.cpu_target }}.txt" 2>/dev/null || echo "unknown")
           echo "Max GLIBC symbol required: ${MAX_GLIBC}"
-          cat glibc-symbols.txt || true
+          cat "glibc-symbols-${{ matrix.arch }}-${{ matrix.cpu_target }}.txt" || true
           echo "### Binary Compatibility (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
           echo "- Highest GLIBC symbol required: \`${MAX_GLIBC}\`" >> $GITHUB_STEP_SUMMARY
 
@@ -220,7 +220,7 @@ jobs:
           path: |
             *.deb
             *.rpm
-            glibc-symbols.txt
+            glibc-symbols-*.txt
           if-no-files-found: error
 
   publish-release:
@@ -276,11 +276,12 @@ jobs:
           echo "RELEASE_TAG=v${VERSION}-${ITERATION}" >> $GITHUB_ENV
           echo "RELEASE_NAME=Kvrocks ${VERSION}-${ITERATION}" >> $GITHUB_ENV
 
-      - name: Generate Checksums
+      - name: Generate Checksums & Consolidate Glibc Symbols
         run: |
           cd dist
           sha256sum *.deb *.rpm > SHA256SUMS
           cat SHA256SUMS
+          cat glibc-symbols-*.txt 2>/dev/null | sort -Vu > glibc-symbols.txt || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
