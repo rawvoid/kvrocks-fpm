@@ -142,14 +142,27 @@ info "Selected Target Package: ${BOLD}${TARGET_PACKAGE}${NC}"
 # 4. Configure APT Repository
 REPO_URL="${KVROCKS_REPO_URL:-https://rawvoid.github.io/kvrocks-fpm}"
 REPO_LIST="/etc/apt/sources.list.d/kvrocks.list"
+KEYRING_DIR="/etc/apt/keyrings"
+KEYRING_FILE="${KEYRING_DIR}/kvrocks.gpg"
 
 info "Configuring APT repository: ${REPO_URL}"
 mkdir -p /etc/apt/sources.list.d
+install -m 0755 -d "$KEYRING_DIR"
+
+info "Fetching repository GPG signing key..."
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "${REPO_URL}/kvrocks.gpg" -o "$KEYRING_FILE"
+elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$KEYRING_FILE" "${REPO_URL}/kvrocks.gpg"
+else
+    error "Neither curl nor wget is available. Please install curl or wget."
+fi
+chmod 0644 "$KEYRING_FILE"
 
 # Write repository source entry
 cat > "$REPO_LIST" << EOF
 # Apache Kvrocks Repository
-deb [trusted=yes] ${REPO_URL} stable main
+deb [signed-by=${KEYRING_FILE}] ${REPO_URL} stable main
 EOF
 
 # 5. Update APT cache and install package
@@ -161,7 +174,7 @@ apt-get update -o Dir::Etc::sourcelist="sources.list.d/kvrocks.list" \
 
 info "Installing ${TARGET_PACKAGE}..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get install -y --allow-unauthenticated "${TARGET_PACKAGE}"
+apt-get install -y "${TARGET_PACKAGE}"
 
 # 6. Installation verification and summary
 if command -v kvrocks >/dev/null 2>&1; then

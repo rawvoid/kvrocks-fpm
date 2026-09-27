@@ -10,7 +10,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **CPU Microarchitecture Optimization**:
   - **Performance Default (`x86-64-v3`)**: Compiled with `-march=x86-64-v3 -mpclmul -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2, PCLMUL) for modern servers (~15-30% higher RocksDB throughput).
   - **Compatibility (`legacy`)**: Baseline `x86-64-v1` compatibility (`PORTABLE=1`) for older CPUs/VMs without AVX2.
-- **Debian / Ubuntu APT Repository**: Hosted on GitHub Pages with automated index updates and version management.
+- **Secure Debian / Ubuntu APT Repository**: Hosted on GitHub Pages with automated GPG signing (SecureApt), index updates, and multi-version management.
 - **CPU-Aware One-Click Installer**: Automatically detects host CPU instruction sets (AVX2/BMI2) and installs the optimal package.
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
@@ -44,9 +44,14 @@ curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
 
 ### 2. Debian / Ubuntu APT Repository (Manual Setup)
 
-#### Step 1: Add the APT Repository
+#### Step 1: Add GPG Key and APT Repository
 ```bash
-echo "deb [trusted=yes] https://rawvoid.github.io/kvrocks-fpm stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list
+# 1. Install repository GPG signing key
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://rawvoid.github.io/kvrocks-fpm/kvrocks.gpg | sudo tee /etc/apt/keyrings/kvrocks.gpg > /dev/null
+
+# 2. Add repository source entry
+echo "deb [signed-by=/etc/apt/keyrings/kvrocks.gpg] https://rawvoid.github.io/kvrocks-fpm stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list
 sudo apt-get update
 ```
 

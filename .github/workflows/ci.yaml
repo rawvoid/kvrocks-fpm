@@ -308,13 +308,30 @@ jobs:
           path: apt-repo-existing
 
       - name: Build Debian APT Repository
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils
+          sudo apt-get install -y dpkg-dev apt-utils gnupg
 
           mkdir -p apt-repo/pool/main
           mkdir -p apt-repo/dists/stable/main/binary-amd64
           mkdir -p apt-repo/dists/stable/main/binary-arm64
+
+          # Verify and import GPG signing key
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::error::GPG_PRIVATE_KEY secret is not set! SecureApt repository signing cannot proceed."
+            exit 1
+          fi
+
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)
+          echo "Loaded GPG signing key: $GPG_KEY_ID"
+
+          # Export public key to repository root for clients
+          gpg --batch --yes --export "$GPG_KEY_ID" > apt-repo/kvrocks.gpg
+          gpg --batch --yes --armor --export "$GPG_KEY_ID" > apt-repo/kvrocks.asc
 
           # Preserve existing debs if available
           if [ -d apt-repo-existing/pool/main ]; then
@@ -349,6 +366,17 @@ jobs:
             -o APT::FTPArchive::Release::Components="main" \
             -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository" \
             release . > Release
+
+          # Sign Release metadata: InRelease (inline) and Release.gpg (detached)
+          GPG_SIGN_ARGS=(--batch --yes --digest-algo SHA512 --default-key "$GPG_KEY_ID")
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            GPG_SIGN_ARGS+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+          fi
+
+          echo "Signing Release metadata..."
+          gpg "${GPG_SIGN_ARGS[@]}" --clearsign -o InRelease Release
+          gpg "${GPG_SIGN_ARGS[@]}" -abs -o Release.gpg Release
+
           cd ../..
 
       - name: Deploy APT Repository to GitHub Pages
