@@ -13,8 +13,14 @@ fi
 
 # Create directories and set permissions
 mkdir -p /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks
-chown -R kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks 2>/dev/null || true
-chmod 750 /var/lib/kvrocks /var/log/kvrocks 2>/dev/null || true
+chown kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks 2>/dev/null || true
+chmod 750 /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks 2>/dev/null || true
+
+# Secure configuration file and allow CONFIG REWRITE by kvrocks user
+if [ -f /etc/kvrocks/kvrocks.conf ]; then
+    chown kvrocks:kvrocks /etc/kvrocks/kvrocks.conf 2>/dev/null || true
+    chmod 640 /etc/kvrocks/kvrocks.conf 2>/dev/null || true
+fi
 
 # Reload systemd daemon if available
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
