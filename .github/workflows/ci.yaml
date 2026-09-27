@@ -17,9 +17,6 @@ on:
         type: boolean
         required: true
         default: true
-  push:
-    tags:
-      - 'v*'
 
 jobs:
   build-and-package:
@@ -79,20 +76,8 @@ jobs:
 
       - name: Resolve Version & Iteration
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-            ITERATION="${{ inputs.iteration }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            REF="${{ github.ref_name }}"
-            REF="${REF#v}"
-            if [[ "$REF" =~ ^([^-]+)-(.+)$ ]]; then
-              VERSION="${BASH_REMATCH[1]}"
-              ITERATION="${BASH_REMATCH[2]}"
-            else
-              VERSION="$REF"
-              ITERATION="1"
-            fi
-          fi
+          VERSION="${{ inputs.version }}"
+          ITERATION="${{ inputs.iteration }}"
 
           VERSION="${VERSION#v}"
 
@@ -233,7 +218,7 @@ jobs:
   publish-release:
     name: Publish GitHub Release
     needs: build-and-package
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release != false)
+    if: inputs.publish_release == true || inputs.publish_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -248,20 +233,8 @@ jobs:
 
       - name: Resolve Release Tag & Name
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-            ITERATION="${{ inputs.iteration }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            REF="${{ github.ref_name }}"
-            REF="${REF#v}"
-            if [[ "$REF" =~ ^([^-]+)-(.+)$ ]]; then
-              VERSION="${BASH_REMATCH[1]}"
-              ITERATION="${BASH_REMATCH[2]}"
-            else
-              VERSION="$REF"
-              ITERATION="1"
-            fi
-          fi
+          VERSION="${{ inputs.version }}"
+          ITERATION="${{ inputs.iteration }}"
 
           VERSION="${VERSION#v}"
 

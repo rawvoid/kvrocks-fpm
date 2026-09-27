@@ -145,26 +145,17 @@ redis-cli -p 6666 ping
 
 ## 🛠️ Build & Release
 
-### 1. Trigger via GitHub Actions Web UI / CLI
-You can build and package any Apache Kvrocks version on-demand:
+Packages are built and published on-demand via GitHub Actions (`workflow_dispatch`):
 
 * **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`).
 * **GitHub CLI (`gh`)**:
   ```bash
-  # Build and publish release
+  # Build and publish release (packages + APT repository deployment)
   gh workflow run ci.yaml -f version=2.15.0 -f iteration=1
 
-  # Test build only (without creating GitHub release)
+  # Dry-run / test build only (without creating GitHub release or updating APT repository)
   gh workflow run ci.yaml -f version=2.15.0 -f iteration=1 -f publish_release=false
   ```
-
-### 2. Trigger via Git Tag
-Pushing a version tag automatically triggers the build and creates a GitHub Release:
-
-```bash
-git tag v2.15.0-1
-git push origin v2.15.0-1
-```
 
 ---
 
