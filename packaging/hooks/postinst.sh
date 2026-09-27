@@ -23,10 +23,16 @@ mkdir -p /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks
 chown kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks 2>/dev/null || true
 chmod 750 /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks 2>/dev/null || true
 
-# Secure configuration file and allow CONFIG REWRITE by kvrocks user
-if [ -f /etc/kvrocks/kvrocks.conf ]; then
-    chown kvrocks:kvrocks /etc/kvrocks/kvrocks.conf 2>/dev/null || true
-    chmod 640 /etc/kvrocks/kvrocks.conf 2>/dev/null || true
+# Secure configuration file and allow CONFIG REWRITE by kvrocks user.
+# Refuse symlinks to prevent privilege escalation attacks during package upgrades.
+conf=/etc/kvrocks/kvrocks.conf
+if [ -e "$conf" ] || [ -L "$conf" ]; then
+    if [ -L "$conf" ] || [ ! -f "$conf" ]; then
+        echo "kvrocks postinst: $conf must be a regular file, not a symlink" >&2
+        exit 1
+    fi
+    chown kvrocks:kvrocks "$conf"
+    chmod 640 "$conf"
 fi
 
 # Reload systemd daemon if available
