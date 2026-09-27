@@ -1,0 +1,51 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64 arm64
+Codename: stable
+Components: main
+Date: Sun, 27 Sep 2026 18:27:29 +0000
+Description: Apache Kvrocks Debian/Ubuntu APT Repository
+Label: Kvrocks
+Origin: Apache Kvrocks Packages
+Suite: stable
+MD5Sum:
+ b5d31ca653e8710137eec353e289cab8              217 Release
+ 68c3ccb4f2519eb639693dca850a027c             1290 main/binary-amd64/Packages
+ 985eb397588391b5a6c7bd9db275bf4f              604 main/binary-amd64/Packages.gz
+ 6910ca91e0e23c6b938effd464951110              585 main/binary-arm64/Packages
+ f861cf40554a0032f002d9805f43ea06              445 main/binary-arm64/Packages.gz
+SHA1:
+ 4d4ac30ded1ae8e2ac70d47d6257bce3f21b44ef              217 Release
+ 444be765d709fd916f429c152f20dbf07a878d18             1290 main/binary-amd64/Packages
+ 28117752ac0375a9cfca2318908e0d43d38bc634              604 main/binary-amd64/Packages.gz
+ d582ec07a8604e62f3492ec3e177e265d8d648a9              585 main/binary-arm64/Packages
+ 24a5b076161f6dd0bdf59e7725ab620dba87c8da              445 main/binary-arm64/Packages.gz
+SHA256:
+ 94fc27054403aafb367b452c0b519eca9998875ee51562f1b7d12f9013e804c1              217 Release
+ 987aec303d926507b9a1214e758ca9ced237b4dd9cd99e7908f4a3d0f12409ae             1290 main/binary-amd64/Packages
+ a13a37af448a65efd8afd6374b172be29ecbad20ae6999232c7cb9a883313035              604 main/binary-amd64/Packages.gz
+ f9e3e14f3cf2b5f60d1dabd4ff8d9ca30c0ad4e8779a4634d47e9d87fad3007a              585 main/binary-arm64/Packages
+ a2089b4b193d2b84abf9332871615d83477dea4dffd7d21df5b495027c4e4425              445 main/binary-arm64/Packages.gz
+SHA512:
+ cc0c3428d8d5d3f5ebf9a538ba1cb2bf5883dcbee7b81830970a5540bee0eaae90ac285239af23987f8c715d201cd26eca944bba3ded27186ba274d9777fdd16              217 Release
+ 57f8b4c54e23516d107011b1ac52cc6ec4141de5219910603183619ca179a738ed9c4f37c239bbee7f689077968710c30e66be0d53799ee1aa4aab68feb3aef7             1290 main/binary-amd64/Packages
+ e4cf0671484fd2e246f745e97c9cf7947bc365f9c03900b3c05f9c96e2a6a3daaf58e864a544ea10c44ecc2eccff2f5ddce7c92167c63a6fcfd4fff11609a500              604 main/binary-amd64/Packages.gz
+ a031e5728817b8db15581828ef261b3c3e84f868b216ac93ad99455efe9527c805e876e7764785cc9212a2bfd0ecf29e228a1cad30b8d675b5de7995ac5865f2              585 main/binary-arm64/Packages
+ c7fd05def5cf05c7ff2cd9c7d00a2e0b0d6242a08624e8cfd5781d3af1f8a40251b191b22bf5df0ad36dbabfa90cb10197e3c176156ade4e0a487e8d71fedc6d              445 main/binary-arm64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEXt7VJTLS7mDUScEQjzU/hn5gLLcFAmq5YBEACgkQjzU/hn5g
+LLcAqxAAjvpCmg2ErIVpjETqdtjhkCFsp5zGUdH2abx3pjctEZU4OXXwaNzbjyQQ
+yNl/Hb2jzV7UIu4NzWFKDRSy6grUgSoq+EOMGhv9dOBFk3uhaZtQHFiyezO/xd9u
+CDtChr0ih0gQ23OTyXRU49tG4k+ebMOD+U8XehZ/ePFq4xvxe3J66hixIdteU7F4
+Go9tljkjsBbvQXZwQ/dCRXkEsIibSMnPt/3SUNw8Ju02yp0mdqluut+JAzIRaGMF
+yUhmAQ+FIUWT4B0zP5EPB6w3SDjwd3oErKJbUaVswYJgu8XY3t2WVZIYZKRBidCg
+dqCnpF37/lmTqSxltuCujuxir5u7vS+nHLTMx9KUQZ/w2k9mJuJYbyySkqhrFjsT
+t9TlSfpRFc0tC4iIVsKxNJ2bBIlKTRCq6FzPYUF3BvwcXNjm8XfR3wvuOKP08iXm
+gFadTfxi48JMI0YOHJiDIkw5Hc9W80EFGpPtJq8cL9vO09pJK8QwcAizG0kd+4ru
+6Q2UXqqcl6MgSNVOU/6yCPufbCNmDzMeC6gzqueaJfLm/zVbJM+UlcOR3oRt5FuY
+eBmZqEZvkeXfSFyzSxDTYJ/XJbKeJRY9/1618IZGboSIPQx1GHmfHFwdEs0T25tm
+knsGUp04KrU4jFGSemOgJmXjpmKV8UN9jLNam2dPW26BvgUsPsc=
+=X/Yb
+-----END PGP SIGNATURE-----
