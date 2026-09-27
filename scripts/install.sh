@@ -40,7 +40,7 @@ if [ "$(id -u)" -ne 0 ]; then
     error "This script must be run as root. Please run with sudo: sudo bash $0"
 fi
 
-printf "${CYAN}${BOLD}"
+printf '%b' "${CYAN}${BOLD}"
 cat << 'EOF'
   _  __                      _        
  | |/ /                     | |       
@@ -50,13 +50,14 @@ cat << 'EOF'
  |_|\_\  \_/  |_|  \___/ \___|_|\_\___/
       Apache Kvrocks Automated Installer
 EOF
-printf "${NC}\n"
+printf '%b\n' "${NC}"
 
 # 2. Check OS distribution
 if [ ! -f /etc/os-release ]; then
     error "Cannot determine operating system. /etc/os-release is missing."
 fi
 
+# shellcheck source=/dev/null
 . /etc/os-release
 
 OS_ID="${ID:-}"
@@ -100,8 +101,8 @@ CPU_DETAIL="Standard (aarch64)"
 
 if [ "$ARCH" = "amd64" ]; then
     # Check if host CPU supports x86-64-v3 (AVX2 and BMI2)
-    if grep -qE "(^|\s)avx2(\s|$)" /proc/cpuinfo 2>/dev/null && \
-       grep -qE "(^|\s)bmi2(\s|$)" /proc/cpuinfo 2>/dev/null; then
+    if grep -qw "avx2" /proc/cpuinfo 2>/dev/null && \
+       grep -qw "bmi2" /proc/cpuinfo 2>/dev/null; then
         TARGET_PACKAGE="kvrocks"
         CPU_DETAIL="Optimized (x86-64-v3 / AVX2 & BMI2)"
     else
@@ -112,27 +113,34 @@ fi
 
 # Allow environment override: e.g. KVROCKS_FLAVOR=legacy, generic, or default
 if [ -n "${KVROCKS_FLAVOR:-}" ]; then
-    if [ "${KVROCKS_FLAVOR}" = "generic" ]; then
-        if [ "$ARCH" = "arm64" ]; then
+    case "${KVROCKS_FLAVOR}" in
+        generic)
+            if [ "$ARCH" = "arm64" ]; then
+                TARGET_PACKAGE="kvrocks"
+                CPU_DETAIL="Standard (aarch64)"
+            else
+                TARGET_PACKAGE="kvrocks-legacy"
+                CPU_DETAIL="Forced Legacy (generic) by KVROCKS_FLAVOR"
+            fi
+            ;;
+        legacy|v1)
+            if [ "$ARCH" = "arm64" ]; then
+                warn "Legacy flavor is only available for amd64 architecture. Using default kvrocks package for arm64."
+                TARGET_PACKAGE="kvrocks"
+                CPU_DETAIL="Standard (aarch64)"
+            else
+                TARGET_PACKAGE="kvrocks-legacy"
+                CPU_DETAIL="Forced Legacy by KVROCKS_FLAVOR"
+            fi
+            ;;
+        default|v3|avx2)
             TARGET_PACKAGE="kvrocks"
-            CPU_DETAIL="Standard (aarch64)"
-        else
-            TARGET_PACKAGE="kvrocks-legacy"
-            CPU_DETAIL="Forced Legacy (generic) by KVROCKS_FLAVOR"
-        fi
-    elif [ "${KVROCKS_FLAVOR}" = "legacy" ] || [ "${KVROCKS_FLAVOR}" = "v1" ]; then
-        if [ "$ARCH" = "arm64" ]; then
-            warn "Legacy flavor is only available for amd64 architecture. Using default kvrocks package for arm64."
-            TARGET_PACKAGE="kvrocks"
-            CPU_DETAIL="Standard (aarch64)"
-        else
-            TARGET_PACKAGE="kvrocks-legacy"
-            CPU_DETAIL="Forced Legacy by KVROCKS_FLAVOR"
-        fi
-    elif [ "${KVROCKS_FLAVOR}" = "default" ] || [ "${KVROCKS_FLAVOR}" = "v3" ] || [ "${KVROCKS_FLAVOR}" = "avx2" ]; then
-        TARGET_PACKAGE="kvrocks"
-        CPU_DETAIL="Forced Default (v3) by KVROCKS_FLAVOR"
-    fi
+            CPU_DETAIL="Forced Default (v3) by KVROCKS_FLAVOR"
+            ;;
+        *)
+            warn "Unrecognized KVROCKS_FLAVOR '${KVROCKS_FLAVOR}'. Using detected target: ${TARGET_PACKAGE}"
+            ;;
+    esac
 fi
 
 info "Hardware Architecture: ${ARCH}"
@@ -184,10 +192,10 @@ else
     success "Package installation completed."
 fi
 
-printf "\n${GREEN}${BOLD}=== Getting Started with Apache Kvrocks ===${NC}\n"
-printf "  • Start service:   ${CYAN}sudo systemctl start kvrocks${NC}\n"
-printf "  • Enable autostart:${CYAN}sudo systemctl enable kvrocks${NC}\n"
-printf "  • Check status:    ${CYAN}sudo systemctl status kvrocks${NC}\n"
-printf "  • View logs:       ${CYAN}sudo journalctl -u kvrocks -f${NC}\n"
-printf "  • Connect:         ${CYAN}redis-cli -p 6666 ping${NC}\n"
-printf "  • Configuration:   ${CYAN}/etc/kvrocks/kvrocks.conf${NC}\n\n"
+printf '\n%b%b=== Getting Started with Apache Kvrocks ===%b\n' "${GREEN}" "${BOLD}" "${NC}"
+printf '  • Start service:   %b\n' "${CYAN}sudo systemctl start kvrocks${NC}"
+printf '  • Enable autostart:%b\n' "${CYAN}sudo systemctl enable kvrocks${NC}"
+printf '  • Check status:    %b\n' "${CYAN}sudo systemctl status kvrocks${NC}"
+printf '  • View logs:       %b\n' "${CYAN}sudo journalctl -u kvrocks -f${NC}"
+printf '  • Connect:         %b\n' "${CYAN}redis-cli -p 6666 ping${NC}"
+printf '  • Configuration:   %b\n\n' "${CYAN}/etc/kvrocks/kvrocks.conf${NC}"
