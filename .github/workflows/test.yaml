@@ -1,0 +1,32 @@
+name: Test & Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run Python Unit Tests
+        run: |
+          python3 -m unittest discover -s packaging -p "test_*.py" -v
+
+      - name: Run Shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck scripts/install.sh packaging/hooks/*.sh
+
+      - name: Validate Shell Script Syntax
+        run: |
+          bash -n scripts/install.sh packaging/hooks/*.sh
