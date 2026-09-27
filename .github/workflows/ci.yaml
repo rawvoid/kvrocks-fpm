@@ -94,6 +94,8 @@ jobs:
             fi
           fi
 
+          VERSION="${VERSION#v}"
+
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
             exit 1
@@ -165,8 +167,10 @@ jobs:
             -v "${{ env.VERSION }}" \
             --iteration "${{ env.ITERATION }}" \
             -a "${{ matrix.arch }}" \
+            -d "libssl3" \
             -C rootfs \
             --config-files /etc/kvrocks/kvrocks.conf \
+            --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
@@ -184,6 +188,7 @@ jobs:
             -a "${{ matrix.rpm_arch }}" \
             -C rootfs \
             --config-files /etc/kvrocks/kvrocks.conf \
+            --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
@@ -233,6 +238,8 @@ jobs:
               ITERATION="1"
             fi
           fi
+
+          VERSION="${VERSION#v}"
 
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
@@ -285,12 +292,15 @@ jobs:
           # Copy installer script to root
           cp scripts/install.sh apt-repo/install.sh
 
-          # Scan packages and generate index files
+          # Prevent GitHub Pages from ignoring or filtering repository files
+          touch apt-repo/.nojekyll
+
+          # Scan packages and generate index files (with -m for multiversion index)
           cd apt-repo
-          dpkg-scanpackages --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
+          dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
           gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
 
-          dpkg-scanpackages --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
+          dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
           gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
 
           # Generate Release metadata
