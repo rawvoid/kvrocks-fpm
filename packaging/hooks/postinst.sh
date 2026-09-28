@@ -18,7 +18,9 @@ fi
 
 # Create kvrocks user if it doesn't exist
 if ! getent passwd kvrocks >/dev/null 2>&1; then
-    useradd -r -g kvrocks -d /var/lib/kvrocks -s /sbin/nologin -c "Kvrocks Server" kvrocks >/dev/null 2>&1 || true
+    nologin_bin="$(command -v nologin 2>/dev/null || echo '/usr/sbin/nologin')"
+    [ -x "$nologin_bin" ] || nologin_bin="/bin/false"
+    useradd -r -M -g kvrocks -d /var/lib/kvrocks -s "$nologin_bin" -c "Kvrocks Server" kvrocks >/dev/null 2>&1 || true
 fi
 
 # Create directories and set permissions
