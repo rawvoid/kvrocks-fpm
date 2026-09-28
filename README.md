@@ -137,7 +137,8 @@ redis-cli -p 6666 ping
 | `/usr/bin/kvrocks2redis` | Data migration utility to sync Kvrocks to Redis |
 | `/etc/kvrocks/kvrocks.conf` | Active production configuration (protected during package upgrades) |
 | `/usr/share/doc/kvrocks/kvrocks.conf.default` | Pristine upstream configuration reference (for diffing & auditing) |
-| `/lib/systemd/system/kvrocks.service` (DEB) / `/usr/lib/systemd/system/kvrocks.service` (RPM) | Systemd service unit |
+| `/usr/share/doc/kvrocks/kvrocks2redis.conf.default` | Pristine upstream Redis migration configuration reference |
+| `/usr/lib/systemd/system/kvrocks.service` | Systemd service unit |
 | `/var/lib/kvrocks/` | Working & database storage directory (owned by `kvrocks:kvrocks`) |
 | `/var/log/kvrocks/` | Server log directory (`kvrocks_YYYY-MM-DD.log`, owned by `kvrocks:kvrocks`) |
 | `/usr/share/doc/kvrocks/` | License, Notice, and upstream reference documentation |
