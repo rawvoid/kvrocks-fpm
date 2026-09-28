@@ -35,6 +35,9 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 
 ## 🚀 Installation & Usage
 
+> [!TIP]
+> **Repository Retention Policy**: Online APT and RPM repositories hosted on GitHub Pages maintain the **latest 5 releases** to stay strictly within GitHub Pages storage quotas (~715 MB). All historical releases, tar archives, and detached debug symbols remain permanently accessible on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases).
+
 ### 1. One-Click Automated Install (Debian, Ubuntu, Fedora)
 
 The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the appropriate repository (APT or YUM/DNF), and installs the fastest compatible package variant:

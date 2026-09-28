@@ -460,12 +460,126 @@ jobs:
             GPG_BASE_ARGS+=(--pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase)
           fi
 
-          # 1. Debian APT Repository
+          # ==========================================
+          # 1. Collect Existing Packages & Newly Built Artifacts
+          # ==========================================
           if [ -d apt-repo-existing/pool/main ]; then
             cp -n apt-repo-existing/pool/main/*.deb apt-repo/pool/main/ 2>/dev/null || true
           fi
-          cp dist/*.deb apt-repo/pool/main/
+          if [ -d apt-repo-existing/rpm/x86_64 ]; then
+            cp -n apt-repo-existing/rpm/x86_64/*.rpm apt-repo/rpm/x86_64/ 2>/dev/null || true
+          fi
+          if [ -d apt-repo-existing/rpm/aarch64 ]; then
+            cp -n apt-repo-existing/rpm/aarch64/*.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
+          fi
 
+          # Copy newly built packages for current release
+          cp dist/*.deb apt-repo/pool/main/
+          cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
+          cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
+
+          # ==========================================
+          # 2. GitHub Pages Quota Retention Policy (Retain Latest 5 Releases)
+          # ==========================================
+          RETENTION_LIMIT=5
+          RECENT_TAGS=$(gh release list --limit 30 --json tagName -q '.[].tagName' | grep -E '^v?[0-9]+\.' || true)
+          KEEP_TAGS=$(printf "%s\n%s\n" "${RELEASE_TAG:-}" "$RECENT_TAGS" | grep -v '^$' | awk '!seen[$0]++' | head -n "$RETENTION_LIMIT")
+
+          if [ -z "$KEEP_TAGS" ]; then
+            echo "::error::Failed to resolve retention whitelist! Aborting to protect repository data."
+            exit 1
+          fi
+
+          KEEP_VERSIONS=()
+          echo "Active retention whitelist (latest ${RETENTION_LIMIT} releases):"
+          for tag in $KEEP_TAGS; do
+            ver="${tag#v}"
+            echo "  • ${tag} (version token: ${ver})"
+            KEEP_VERSIONS+=("$ver")
+          done
+
+          # Safety check: ensure current version is explicitly in KEEP_VERSIONS
+          CURRENT_VER="${RELEASE_TAG#v}"
+          if [ -n "$CURRENT_VER" ]; then
+            found_current=0
+            for v in "${KEEP_VERSIONS[@]}"; do
+              [ "$v" = "$CURRENT_VER" ] && found_current=1 && break
+            done
+            if [ "$found_current" -ne 1 ]; then
+              echo "::error::Current release version ($CURRENT_VER) is missing from retention whitelist! Aborting."
+              exit 1
+            fi
+          fi
+
+          # ==========================================
+          # 3. Backfill Retained Historical RPMs (Only if Missing)
+          # ==========================================
+          for tag in $KEEP_TAGS; do
+            [ "$tag" = "${RELEASE_TAG:-}" ] && continue
+            ver="${tag#v}"
+            if compgen -G "apt-repo/rpm/x86_64/*${ver}*.rpm" >/dev/null && \
+               compgen -G "apt-repo/rpm/aarch64/*${ver}*.rpm" >/dev/null; then
+              continue
+            fi
+
+            echo "Backfilling missing RPM packages for retained release $tag..."
+            mkdir -p "/tmp/backfill-${tag}"
+            if gh release download "$tag" --pattern "*.rpm" --dir "/tmp/backfill-${tag}" 2>/dev/null; then
+              for rpm in "/tmp/backfill-${tag}"/*.rpm; do
+                [ -f "$rpm" ] || continue
+                case "$rpm" in
+                  *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
+                  *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
+                esac
+              done
+            fi
+            rm -rf "/tmp/backfill-${tag}"
+          done
+
+          # ==========================================
+          # 4. Safe Pruning of Packages Exceeding Retention Window
+          # ==========================================
+          is_retained() {
+            local filename="$1"
+            for v in "${KEEP_VERSIONS[@]}"; do
+              case "$filename" in
+                *_${v}_*.deb) return 0 ;;
+                *-${v}.*.rpm) return 0 ;;
+              esac
+            done
+            return 1
+          }
+
+          echo "Applying retention pruning to GitHub Pages repository..."
+          for pkg in apt-repo/pool/main/*.deb apt-repo/rpm/x86_64/*.rpm apt-repo/rpm/aarch64/*.rpm; do
+            [ -f "$pkg" ] || continue
+            pkg_name="$(basename "$pkg")"
+            if ! is_retained "$pkg_name"; then
+              echo "  [PRUNE] Removing historical package from Pages: $pkg_name"
+              rm -f "$pkg"
+            fi
+          done
+
+          # Post-pruning safety assertions: verify repository integrity
+          REMAINING_DEBS=$(find apt-repo/pool/main -name "*.deb" 2>/dev/null | wc -l)
+          REMAINING_X86_RPMS=$(find apt-repo/rpm/x86_64 -name "*.rpm" 2>/dev/null | wc -l)
+          REMAINING_ARM_RPMS=$(find apt-repo/rpm/aarch64 -name "*.rpm" 2>/dev/null | wc -l)
+          echo "Retained package counts: DEB=$REMAINING_DEBS, RPM(x86_64)=$REMAINING_X86_RPMS, RPM(aarch64)=$REMAINING_ARM_RPMS"
+
+          if [ "$REMAINING_DEBS" -lt 1 ] || [ "$REMAINING_X86_RPMS" -lt 1 ] || [ "$REMAINING_ARM_RPMS" -lt 1 ]; then
+            echo "::error::Retention pruning left one or more repository architectures empty! Aborting deployment to protect integrity."
+            exit 1
+          fi
+
+          TOTAL_PAGES_MB=$(du -sm apt-repo | cut -f1)
+          echo "Current apt-repo disk footprint: ${TOTAL_PAGES_MB} MB (Safe limit: 1000 MB)"
+          if [ "$TOTAL_PAGES_MB" -gt 900 ]; then
+            echo "::warning::Repository size (${TOTAL_PAGES_MB} MB) is approaching GitHub Pages 1GB limit!"
+          fi
+
+          # ==========================================
+          # 5. Build Debian APT Repository Metadata
+          # ==========================================
           (
             cd apt-repo
             dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
@@ -490,44 +604,9 @@ jobs:
             gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 -abs -o Release.gpg Release
           )
 
-          # 2. RPM Repository
-          if [ -d apt-repo-existing/rpm/x86_64 ]; then
-            cp -n apt-repo-existing/rpm/x86_64/*.rpm apt-repo/rpm/x86_64/ 2>/dev/null || true
-          fi
-          if [ -d apt-repo-existing/rpm/aarch64 ]; then
-            cp -n apt-repo-existing/rpm/aarch64/*.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
-          fi
-
-          # Copy newly built (and signed) rpm packages
-          cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
-          cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
-
-          # Backfill historical releases if missing from rpm repository
-          for tag in $(gh release list --limit 100 --json tagName -q '.[].tagName'); do
-            echo "$tag" | grep -Eq '^v?[0-9]+\.' || continue
-            [ "$tag" = "${RELEASE_TAG:-}" ] && continue
-            ver="${tag#v}"
-
-            # Check if packages for this release version already exist in repository
-            if compgen -G "apt-repo/rpm/x86_64/*${ver}*.rpm" >/dev/null && \
-               compgen -G "apt-repo/rpm/aarch64/*${ver}*.rpm" >/dev/null; then
-              continue
-            fi
-
-            echo "Backfilling missing RPM packages for release $tag..."
-            mkdir -p "/tmp/backfill-${tag}"
-            if gh release download "$tag" --pattern "*.rpm" --dir "/tmp/backfill-${tag}" 2>/dev/null; then
-              for rpm in "/tmp/backfill-${tag}"/*.rpm; do
-                [ -f "$rpm" ] || continue
-                case "$rpm" in
-                  *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
-                  *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
-                esac
-              done
-            fi
-            rm -rf "/tmp/backfill-${tag}"
-          done
-
+          # ==========================================
+          # 6. Build RPM Repository Metadata & Signing
+          # ==========================================
           # Configure RPM macros for package signing
           printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
           if [ -n "$GPG_PASSPHRASE" ]; then
@@ -566,6 +645,7 @@ jobs:
           echo "- **RPM Repository**: \`https://rawvoid.github.io/kvrocks-fpm/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **YUM / DNF Repo Config**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GPG Public Key (ASCII)**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Retention Policy**: Retaining latest ${RETENTION_LIMIT} releases on Pages (~${TOTAL_PAGES_MB} MB). All historical releases remain available on GitHub Releases." >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy Repositories to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
