@@ -9,14 +9,18 @@
 
 set -euo pipefail
 
-# Visual formatting
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+# Visual formatting (disabled if not in a terminal or NO_COLOR is set)
+if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
+fi
 
 info() {
     printf "${BLUE}[INFO]${NC} %s\n" "$1"
@@ -50,7 +54,7 @@ is_debian_derivative() {
 main() {
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
-        error "This script must be run as root. Please run with sudo: sudo bash $0"
+        error "This script must be run as root. Please run: curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash"
     fi
 
     printf '%b' "${CYAN}${BOLD}"
@@ -114,7 +118,8 @@ EOF
 
     # Allow environment override: e.g. KVROCKS_FLAVOR=legacy, generic, or default
     if [ -n "${KVROCKS_FLAVOR:-}" ]; then
-        case "${KVROCKS_FLAVOR}" in
+        FLAVOR="$(echo "$KVROCKS_FLAVOR" | tr '[:upper:]' '[:lower:]')"
+        case "$FLAVOR" in
             generic)
                 if [ "$ARCH" = "arm64" ]; then
                     TARGET_PACKAGE="kvrocks"
@@ -159,34 +164,37 @@ EOF
     install -m 0755 -d "$KEYRING_DIR"
 
     info "Fetching repository GPG signing key..."
-    TMP_KEY="$(mktemp "${KEYRING_DIR}/kvrocks.gpg.XXXXXX")"
+    TMP_KEY="$(mktemp)"
+    trap 'rm -f "$TMP_KEY"' EXIT
+
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "${REPO_URL}/kvrocks.gpg" -o "$TMP_KEY"
     elif command -v wget >/dev/null 2>&1; then
         wget -qO "$TMP_KEY" "${REPO_URL}/kvrocks.gpg"
     else
-        rm -f "$TMP_KEY"
         error "Neither curl nor wget is available. Please install curl or wget."
     fi
 
-    if [ ! -s "$TMP_KEY" ]; then
-        rm -f "$TMP_KEY"
-        error "Downloaded GPG signing key is empty or corrupted."
+    if [ ! -s "$TMP_KEY" ] || head -c 256 "$TMP_KEY" | grep -qiE '(<html|<!doctype)'; then
+        error "Downloaded GPG signing key is invalid, empty, or an HTML error page."
     fi
 
-    chmod 0644 "$TMP_KEY"
-    mv -f "$TMP_KEY" "$KEYRING_FILE"
+    install -m 0644 "$TMP_KEY" "$KEYRING_FILE"
+    rm -f "$TMP_KEY"
+    trap - EXIT
 
     # Write repository source entry
     cat > "$REPO_LIST" << EOF
 # Apache Kvrocks Repository
-deb [signed-by=${KEYRING_FILE}] ${REPO_URL} stable main
+deb [arch=${ARCH} signed-by=${KEYRING_FILE}] ${REPO_URL} stable main
 EOF
     chmod 0644 "$REPO_LIST"
 
     # 5. Update APT cache and install package
     info "Updating package lists..."
-    apt-get update
+    if ! apt-get update; then
+        warn "apt-get update encountered issues (possibly from other repositories). Attempting to proceed..."
+    fi
 
     info "Installing ${TARGET_PACKAGE}..."
     export DEBIAN_FRONTEND=noninteractive
@@ -194,7 +202,7 @@ EOF
 
     # 6. Installation verification and summary
     if command -v kvrocks >/dev/null 2>&1; then
-        INSTALLED_VER="$(kvrocks -v 2>/dev/null || echo 'installed')"
+        INSTALLED_VER="$(kvrocks --version 2>/dev/null || kvrocks -v 2>/dev/null || echo 'installed')"
         success "Kvrocks successfully installed: ${INSTALLED_VER}"
     else
         success "Package installation completed."
