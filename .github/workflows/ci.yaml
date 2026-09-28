@@ -199,7 +199,11 @@ jobs:
           # License, Notice & Pristine Upstream Configuration References
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
           cp kvrocks/kvrocks.conf rootfs/usr/share/doc/kvrocks/kvrocks.conf.default
-          cp kvrocks/kvrocks2redis.conf rootfs/usr/share/doc/kvrocks/kvrocks2redis.conf.default
+          if [ -f kvrocks/utils/kvrocks2redis/kvrocks2redis.conf ]; then
+            cp kvrocks/utils/kvrocks2redis/kvrocks2redis.conf rootfs/usr/share/doc/kvrocks/kvrocks2redis.conf.default
+          elif [ -f kvrocks/kvrocks2redis.conf ]; then
+            cp kvrocks/kvrocks2redis.conf rootfs/usr/share/doc/kvrocks/kvrocks2redis.conf.default
+          fi
 
           # Systemd service unit (unified standard path /usr/lib/systemd/system)
           cp systemd/kvrocks.service rootfs/usr/lib/systemd/system/
