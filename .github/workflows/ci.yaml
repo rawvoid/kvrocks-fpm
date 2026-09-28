@@ -34,7 +34,8 @@ jobs:
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
             pkg_suffix: ""
-            fpm_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy"
+            deb_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy"
+            rpm_extra_args: "--conflicts kvrocks-legacy"
 
           # Legacy x86-64-v1 build (Baseline compatibility for older CPUs/VMs without AVX2)
           - os: ubuntu-22.04
@@ -44,7 +45,8 @@ jobs:
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-O3"
             pkg_suffix: "-legacy"
-            fpm_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks"
+            deb_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks"
+            rpm_extra_args: "--provides kvrocks --conflicts kvrocks"
 
           # ARM64 / aarch64 build
           - os: ubuntu-22.04-arm
@@ -54,7 +56,8 @@ jobs:
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-O3"
             pkg_suffix: ""
-            fpm_extra_args: ""
+            deb_extra_args: ""
+            rpm_extra_args: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -258,7 +261,7 @@ jobs:
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
             --url 'https://kvrocks.apache.org' \
             --license 'Apache-2.0' \
-            ${{ matrix.fpm_extra_args }} \
+            ${{ matrix.deb_extra_args }} \
             -p "kvrocks${{ matrix.pkg_suffix }}_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.deb"
 
       - name: Package RPM
@@ -269,6 +272,7 @@ jobs:
             --iteration "${{ env.ITERATION }}" \
             -a "${{ matrix.rpm_arch }}" \
             -d "libssl.so.3()(64bit)" \
+            --rpm-digest sha256 \
             --category "database" \
             --vendor "Rawvoid" \
             --maintainer "Rawvoid <rawvoid@users.noreply.github.com>" \
@@ -283,7 +287,7 @@ jobs:
             --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
             --url 'https://kvrocks.apache.org' \
             --license 'Apache-2.0' \
-            ${{ matrix.fpm_extra_args }} \
+            ${{ matrix.rpm_extra_args }} \
             -p "kvrocks${{ matrix.pkg_suffix }}-${{ env.VERSION }}-${{ env.ITERATION }}.${{ matrix.rpm_arch }}.rpm"
 
       - name: Upload Build Artifacts
@@ -366,18 +370,29 @@ jobs:
           if [ -n "$GPG_PASSPHRASE" ]; then
             echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
             chmod 600 /tmp/gpg_passphrase
+            trap 'rm -f /tmp/gpg_passphrase /tmp/kvrocks-signing-key.asc' EXIT
             printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
           else
+            trap 'rm -f /tmp/kvrocks-signing-key.asc' EXIT
             printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
           fi
 
           echo "Signing RPM packages in dist/..."
           rpmsign --addsign dist/*.rpm
-          rm -f /tmp/gpg_passphrase
+
+          # Export public key to a regular file (avoids sudo closing process substitution /dev/fd/N)
+          gpg --armor --export "$GPG_KEY_ID" > /tmp/kvrocks-signing-key.asc
+          sudo rpm --import /tmp/kvrocks-signing-key.asc
 
           echo "Verifying RPM package signatures..."
-          sudo rpm --import <(gpg --armor --export "$GPG_KEY_ID")
-          rpm -K dist/*.rpm
+          for rpm_pkg in dist/*.rpm; do
+            verify_out=$(rpm -K --define '_pkgverify_level all' "$rpm_pkg")
+            echo "$verify_out"
+            if ! echo "$verify_out" | grep -q 'signatures OK'; then
+              echo "::error::RPM package $rpm_pkg is not properly signed!"
+              exit 1
+            fi
+          done
 
       - name: Generate Checksums & Consolidate Glibc Symbols
         run: |
@@ -408,6 +423,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
+          # Abort if remote gh-pages branch exists but checkout failed, preventing repository history wipeout
+          if git ls-remote --heads origin gh-pages | grep -q 'refs/heads/gh-pages'; then
+            if [ ! -d apt-repo-existing/.git ] && [ ! -d apt-repo-existing/pool ]; then
+              echo "::error::Remote gh-pages branch exists but checkout failed! Aborting build to protect existing packages."
+              exit 1
+            fi
+          fi
+
           sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm
 
           mkdir -p apt-repo/pool/main
@@ -418,36 +441,31 @@ jobs:
 
           GPG_KEY_ID="${GPG_KEY_ID:-$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)}"
 
-          # Export public key to repository root for clients
+          # Export public keys
           gpg --batch --yes --export "$GPG_KEY_ID" > apt-repo/kvrocks.gpg
           gpg --batch --yes --armor --export "$GPG_KEY_ID" > apt-repo/kvrocks.asc
+          sudo rpm --import apt-repo/kvrocks.asc
 
-          # Copy installer script to root
+          # Copy installer script and generate client repo config
           cp scripts/install.sh apt-repo/install.sh
-
-          # Generate YUM / DNF client repository configuration file
           printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=https://rawvoid.github.io/kvrocks-fpm/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\n' > apt-repo/kvrocks.repo
-
-          # Prevent GitHub Pages from ignoring or filtering repository files
           touch apt-repo/.nojekyll
 
+          # Prepare GPG base arguments with secure passphrase file handling
           GPG_BASE_ARGS=(--batch --yes --default-key "$GPG_KEY_ID")
           if [ -n "$GPG_PASSPHRASE" ]; then
-            GPG_BASE_ARGS+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+            echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
+            chmod 600 /tmp/gpg_passphrase
+            trap 'rm -f /tmp/gpg_passphrase' EXIT
+            GPG_BASE_ARGS+=(--pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase)
           fi
 
-          # ==========================================
-          # 1. Debian APT Repository Processing
-          # ==========================================
-          # Preserve existing debs if available
+          # 1. Debian APT Repository
           if [ -d apt-repo-existing/pool/main ]; then
             cp -n apt-repo-existing/pool/main/*.deb apt-repo/pool/main/ 2>/dev/null || true
           fi
-
-          # Copy newly built deb packages
           cp dist/*.deb apt-repo/pool/main/
 
-          # Scan packages and generate index files (with -m for multiversion index)
           (
             cd apt-repo
             dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
@@ -456,7 +474,6 @@ jobs:
             dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
             gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
 
-            # Generate Release metadata
             cd dists/stable
             apt-ftparchive \
               -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
@@ -468,19 +485,12 @@ jobs:
               -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository" \
               release . > Release
 
-            # Sign Release metadata: InRelease (inline) and Release.gpg (detached)
-            echo "Signing APT Release metadata..."
+            # Debian SecureApt standardizes on SHA512
             gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 --clearsign -o InRelease Release
             gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 -abs -o Release.gpg Release
           )
 
-          # ==========================================
-          # 2. RPM (YUM / DNF) Repository Processing
-          # ==========================================
-          # Import public key into RPM verification keyring
-          sudo rpm --import apt-repo/kvrocks.asc
-
-          # Preserve existing rpms if available
+          # 2. RPM Repository
           if [ -d apt-repo-existing/rpm/x86_64 ]; then
             cp -n apt-repo-existing/rpm/x86_64/*.rpm apt-repo/rpm/x86_64/ 2>/dev/null || true
           fi
@@ -488,23 +498,19 @@ jobs:
             cp -n apt-repo-existing/rpm/aarch64/*.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
           fi
 
-          # Backfill historical RPM packages from existing GitHub releases if rpm repo is not yet populated
-          if [ ! -d apt-repo-existing/rpm/x86_64 ] || [ -z "$(ls -A apt-repo-existing/rpm/x86_64 2>/dev/null)" ]; then
-            echo "Initial RPM repository setup: backfilling existing release RPMs..."
-            if [ -n "$GPG_PASSPHRASE" ]; then
-              echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
-              chmod 600 /tmp/gpg_passphrase
-            fi
-            for tag in $(gh release list -L 15 --json tagName -q '.[].tagName'); do
+          # Backfill historical releases if any arch has missing packages
+          TOTAL_RELEASES=$(gh release list --limit 100 --json tagName -q '.[].tagName' | grep '^v' | wc -l)
+          X86_COUNT=$(find apt-repo/rpm/x86_64 -name "*.rpm" 2>/dev/null | wc -l)
+          ARM_COUNT=$(find apt-repo/rpm/aarch64 -name "*.rpm" 2>/dev/null | wc -l)
+
+          if [ "$X86_COUNT" -lt "$TOTAL_RELEASES" ] || [ "$ARM_COUNT" -lt "$TOTAL_RELEASES" ]; then
+            echo "Syncing historical release RPMs (x86_64: $X86_COUNT, aarch64: $ARM_COUNT, releases: $TOTAL_RELEASES)..."
+            for tag in $(gh release list --limit 100 --json tagName -q '.[].tagName'); do
               [ "$tag" = "${RELEASE_TAG:-}" ] && continue
               mkdir -p /tmp/backfill-"$tag"
               if gh release download "$tag" --pattern "*.rpm" --dir /tmp/backfill-"$tag" 2>/dev/null; then
                 for rpm in /tmp/backfill-"$tag"/*.rpm; do
                   [ -f "$rpm" ] || continue
-                  if ! rpm -K "$rpm" 2>&1 | grep -q "digests signatures OK"; then
-                    echo "Signing backfilled RPM: $(basename "$rpm")"
-                    rpmsign --addsign "$rpm" || true
-                  fi
                   case "$rpm" in
                     *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
                     *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
@@ -513,26 +519,34 @@ jobs:
               fi
               rm -rf /tmp/backfill-"$tag"
             done
-            rm -f /tmp/gpg_passphrase
           fi
 
           # Copy newly built (and signed) rpm packages
           cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
           cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
 
-          # Generate metadata with createrepo_c
-          echo "Generating RPM metadata for x86_64..."
+          # Ensure all packages in repository have valid signatures
+          for arch in x86_64 aarch64; do
+            for rpm in apt-repo/rpm/"$arch"/*.rpm; do
+              [ -f "$rpm" ] || continue
+              if ! rpm -K --define '_pkgverify_level all' "$rpm" | grep -q 'signatures OK'; then
+                echo "Signing package: $(basename "$rpm")"
+                rpmsign --addsign "$rpm"
+                if ! rpm -K --define '_pkgverify_level all' "$rpm" | grep -q 'signatures OK'; then
+                  echo "::error::Failed to sign package $rpm!"
+                  exit 1
+                fi
+              fi
+            done
+          done
+
           createrepo_c --update apt-repo/rpm/x86_64/
-          echo "Generating RPM metadata for aarch64..."
           createrepo_c --update apt-repo/rpm/aarch64/
 
-          # Sign repomd.xml with GPG (detached ASCII armor) for repo_gpgcheck=1
-          echo "Signing RPM repomd.xml metadata..."
+          # RPM / repomd standardizes on SHA256 detached signature
           gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor -o apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
           gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor -o apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
 
-          # Verify metadata signature
-          echo "Verifying RPM repomd.xml signatures..."
           gpg --verify apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
           gpg --verify apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
 

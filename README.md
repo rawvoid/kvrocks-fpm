@@ -35,9 +35,9 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 
 ## 🚀 Installation & Usage
 
-### 1. One-Click Automated Install (Debian, Ubuntu, RHEL, Rocky, AlmaLinux, Fedora)
+### 1. One-Click Automated Install (Debian, Ubuntu, Fedora)
 
-The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), configures the appropriate repository (APT or YUM/DNF), and installs the fastest compatible package variant:
+The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the appropriate repository (APT or YUM/DNF), and installs the fastest compatible package variant:
 
 ```bash
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
@@ -72,7 +72,11 @@ sudo apt-get update
 
 ---
 
-### 3. RedHat / Rocky / AlmaLinux / Fedora RPM Repository (Manual Setup)
+### 3. Fedora & RPM Systems Repository (Manual Setup)
+
+> [!NOTE]
+> **System Requirement**: Pre-built packages are compiled on Ubuntu 22.04 and require **Glibc >= 2.35** and OpenSSL 3. They run out-of-the-box on modern RPM systems such as **Fedora 36+**.
+> Enterprise Linux 8 & 9 (RHEL, CentOS Stream, Rocky Linux, AlmaLinux) ship with Glibc 2.28 / 2.34; for EL 8/9 systems, please deploy Kvrocks via Docker/container or compile from source.
 
 #### Step 1: Add RPM Repository Configuration
 ```bash

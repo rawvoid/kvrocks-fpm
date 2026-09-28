@@ -104,6 +104,22 @@ EOF
 
     info "Operating System: ${NAME:-Linux} ${VERSION_ID:-} (${OS_FAMILY} family)"
 
+    # Verify runtime glibc compatibility (Kvrocks binary packages require Glibc >= 2.35)
+    GLIBC_VER_STR="$(getconf GNU_LIBC_VERSION 2>/dev/null || ldd --version 2>/dev/null | head -n1 || echo "")"
+    HOST_GLIBC_VER="$(echo "$GLIBC_VER_STR" | grep -oE '[0-9]+\.[0-9]+' | head -n1 || echo "")"
+
+    if [ -n "$HOST_GLIBC_VER" ]; then
+        GLIBC_MAJOR="$(echo "$HOST_GLIBC_VER" | cut -d. -f1)"
+        GLIBC_MINOR="$(echo "$HOST_GLIBC_VER" | cut -d. -f2)"
+        if [ "$GLIBC_MAJOR" -lt 2 ] || { [ "$GLIBC_MAJOR" -eq 2 ] && [ "$GLIBC_MINOR" -lt 35 ]; }; then
+            warn "Detected system GNU C Library (glibc) version: ${HOST_GLIBC_VER}"
+            error "Apache Kvrocks binary packages require glibc >= 2.35 (e.g. Fedora 36+, Ubuntu 22.04+, Debian 12+).
+Enterprise Linux 8 and 9 (RHEL, CentOS Stream, Rocky Linux, AlmaLinux) provide glibc 2.28-2.34 and cannot run these binaries directly.
+For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or compile from source."
+        fi
+        info "GNU C Library (glibc) version: ${HOST_GLIBC_VER} (>= 2.35, verified compatible)"
+    fi
+
     # 3. Detect System Architecture & CPU capabilities
     RAW_ARCH="$(uname -m)"
     case "$RAW_ARCH" in
@@ -238,27 +254,44 @@ EOF
         fi
 
         REPO_FILE="/etc/yum.repos.d/kvrocks.repo"
-        info "Configuring RPM repository: ${REPO_URL}/kvrocks.repo"
-        mkdir -p /etc/yum.repos.d
+        KEY_DIR="/etc/pki/rpm-gpg"
+        KEY_FILE="${KEY_DIR}/RPM-GPG-KEY-kvrocks"
 
-        TMP_REPO="$(mktemp)"
-        trap 'rm -f "$TMP_REPO"' EXIT
+        info "Configuring RPM repository from ${REPO_URL}..."
+        mkdir -p /etc/yum.repos.d "$KEY_DIR"
+
+        info "Fetching repository GPG signing key..."
+        TMP_KEY="$(mktemp)"
+        trap 'rm -f "$TMP_KEY"' EXIT
 
         if command -v curl >/dev/null 2>&1; then
-            curl -fsSL "${REPO_URL}/kvrocks.repo" -o "$TMP_REPO"
+            curl -fsSL "${REPO_URL}/kvrocks.asc" -o "$TMP_KEY"
         elif command -v wget >/dev/null 2>&1; then
-            wget -qO "$TMP_REPO" "${REPO_URL}/kvrocks.repo"
+            wget -qO "$TMP_KEY" "${REPO_URL}/kvrocks.asc"
         else
             error "Neither curl nor wget is available. Please install curl or wget."
         fi
 
-        if [ ! -s "$TMP_REPO" ] || head -c 256 "$TMP_REPO" | grep -qiE '(<html|<!doctype)'; then
-            error "Downloaded repository configuration is invalid, empty, or an HTML error page."
+        if [ ! -s "$TMP_KEY" ] || head -c 256 "$TMP_KEY" | grep -qiE '(<html|<!doctype)'; then
+            error "Downloaded GPG signing key is invalid, empty, or an HTML error page."
         fi
 
-        install -m 0644 "$TMP_REPO" "$REPO_FILE"
-        rm -f "$TMP_REPO"
+        install -m 0644 "$TMP_KEY" "$KEY_FILE"
+        rpm --import "$KEY_FILE" 2>/dev/null || true
+        rm -f "$TMP_KEY"
         trap - EXIT
+
+        # Write repository configuration dynamically using REPO_URL
+        cat > "$REPO_FILE" << EOF
+[kvrocks]
+name=Apache Kvrocks Repository
+baseurl=${REPO_URL}/rpm/\$basearch/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=${REPO_URL}/kvrocks.asc
+EOF
+        chmod 0644 "$REPO_FILE"
 
         # 5. Install package via DNF / YUM
         info "Installing ${TARGET_PACKAGE} via ${PKG_MGR}..."
@@ -267,10 +300,15 @@ EOF
 
     # 6. Installation verification and summary
     if command -v kvrocks >/dev/null 2>&1; then
-        INSTALLED_VER="$(kvrocks --version 2>/dev/null || kvrocks -v 2>/dev/null || echo 'installed')"
-        success "Kvrocks successfully installed: ${INSTALLED_VER}"
+        if INSTALLED_VER="$(kvrocks --version 2>&1 || kvrocks -v 2>&1)"; then
+            success "Kvrocks successfully installed: ${INSTALLED_VER}"
+        else
+            error "Kvrocks package was installed, but binary failed to execute!
+Dynamic linker or runtime dependency error:
+${INSTALLED_VER}"
+        fi
     else
-        success "Package installation completed."
+        error "Package installation command completed, but /usr/bin/kvrocks binary was not found."
     fi
 
     printf '\n%b%b=== Getting Started with Apache Kvrocks ===%b\n' "${GREEN}" "${BOLD}" "${NC}"
