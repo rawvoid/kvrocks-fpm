@@ -42,7 +42,7 @@ jobs:
             rpm_arch: x86_64
             cpu_target: legacy
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
-            extra_flags: ""
+            extra_flags: "-O3"
             pkg_suffix: "-legacy"
             fpm_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks"
 
@@ -52,7 +52,7 @@ jobs:
             rpm_arch: aarch64
             cpu_target: generic
             cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
-            extra_flags: ""
+            extra_flags: "-O3"
             pkg_suffix: ""
             fpm_extra_args: ""
 
@@ -105,10 +105,9 @@ jobs:
           export PATH="/usr/lib/ccache:$PATH"
           export CCACHE_DIR="$HOME/.cache/ccache"
           export LDFLAGS="-static-libstdc++ -static-libgcc $LDFLAGS"
-          if [ -n "${{ matrix.extra_flags }}" ]; then
-            export CFLAGS="${{ matrix.extra_flags }}"
-            export CXXFLAGS="${{ matrix.extra_flags }}"
-          fi
+          # Inject -g to generate comprehensive DWARF debug symbols alongside -O3 optimizations
+          export CFLAGS="-g ${{ matrix.extra_flags }}"
+          export CXXFLAGS="-g ${{ matrix.extra_flags }}"
           ccache -z
 
           git clone --depth 1 -b v${{ env.VERSION }} https://github.com/apache/kvrocks.git
@@ -139,12 +138,13 @@ jobs:
 
       - name: Separate Debug Symbols & Strip Binaries
         run: |
-          DEBUGINFO_NAME="kvrocks-debuginfo-${{ matrix.arch }}-${{ matrix.cpu_target }}.tar.gz"
+          DEBUGINFO_NAME="kvrocks${{ matrix.pkg_suffix }}-debuginfo_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.tar.gz"
           echo "DEBUGINFO_NAME=${DEBUGINFO_NAME}" >> $GITHUB_ENV
 
           echo "=== Extracting detached debug symbols ==="
           objcopy --only-keep-debug kvrocks/build/kvrocks kvrocks/build/kvrocks.debug
           objcopy --only-keep-debug kvrocks/build/kvrocks2redis kvrocks/build/kvrocks2redis.debug
+          chmod 0644 kvrocks/build/kvrocks.debug kvrocks/build/kvrocks2redis.debug
 
           echo "=== Stripping production binaries ==="
           strip --strip-unneeded kvrocks/build/kvrocks
@@ -154,11 +154,30 @@ jobs:
           objcopy --add-gnu-debuglink=kvrocks/build/kvrocks.debug kvrocks/build/kvrocks
           objcopy --add-gnu-debuglink=kvrocks/build/kvrocks2redis.debug kvrocks/build/kvrocks2redis
 
+          echo "=== Quality Gate: Verifying Debug Symbols & Build IDs ==="
+          # 1. Verify DWARF debug sections exist
+          if ! readelf -S kvrocks/build/kvrocks.debug | grep -q '\.debug_info'; then
+            echo "::error::kvrocks.debug does not contain .debug_info! DWARF symbol generation failed."
+            exit 1
+          fi
+          echo "Verified: kvrocks.debug contains valid DWARF debug sections."
+
+          # 2. Verify binary and detached debuginfo share the exact same GNU Build ID
+          KV_BIN_ID=$(readelf -n kvrocks/build/kvrocks | awk '/Build ID:/{print $3}')
+          KV_DBG_ID=$(readelf -n kvrocks/build/kvrocks.debug | awk '/Build ID:/{print $3}')
+          echo "Kvrocks GNU Build ID: ${KV_BIN_ID}"
+          if [ -z "$KV_BIN_ID" ] || [ "$KV_BIN_ID" != "$KV_DBG_ID" ]; then
+            echo "::error::Build ID mismatch! Binary (${KV_BIN_ID}) != Debug (${KV_DBG_ID})"
+            exit 1
+          fi
+          echo "Verified: GNU Build IDs match perfectly."
+
           echo "=== Archiving debug symbols ==="
           tar -czf "${DEBUGINFO_NAME}" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
           ls -lh "${DEBUGINFO_NAME}" kvrocks/build/kvrocks kvrocks/build/kvrocks2redis
 
           echo "### Binary Stripping & Detached Debuginfo (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
+          echo "- GNU Build ID: \`${KV_BIN_ID}\`" >> $GITHUB_STEP_SUMMARY
           echo "- Stripped binary size: \`$(du -h kvrocks/build/kvrocks | cut -f1)\`" >> $GITHUB_STEP_SUMMARY
           echo "- Detached debug archive: \`${DEBUGINFO_NAME}\` (\`$(du -h ${DEBUGINFO_NAME} | cut -f1)\`)" >> $GITHUB_STEP_SUMMARY
 

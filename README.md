@@ -17,7 +17,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
 - **Production Log Management**: Native daily date-based log rotation (`kvrocks_YYYY-MM-DD.log`) with automated 30-day retention cleanup (`log-retention-days 30`).
 - **Upstream Configuration Baseline**: Retains pristine official template at `/usr/share/doc/kvrocks/kvrocks.conf.default` for instant diffing and auditability.
-- **Automated Checksums & Detached Debug Symbols**: Every release includes `SHA256SUMS` and companion debug symbol archives (`kvrocks-debuginfo-*.tar.gz`) for non-intrusive production coredump and profiling analysis.
+- **Automated Checksums & Detached Debug Symbols**: Every release includes `SHA256SUMS` and companion debug symbol archives (`kvrocks[-legacy]-debuginfo_*.tar.gz`) for non-intrusive production coredump and profiling analysis.
 
 ---
 
@@ -29,7 +29,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 | `kvrocks-legacy_<ver>-<iter>_amd64.deb`<br>`kvrocks-legacy-<ver>-<iter>.x86_64.rpm` | `x86_64` | `legacy` (x86-64-v1) | Baseline compatibility for older CPUs/VMs without AVX2. |
 | `kvrocks_<ver>-<iter>_arm64.deb`<br>`kvrocks-<ver>-<iter>.aarch64.rpm` | `aarch64` | `generic` | 64-bit ARM (AWS Graviton, Aliyun/Tencent ARM, Kunpeng, etc.). |
 
-*(Note: Production packages contain stripped binaries with embedded `.gnu_debuglink`. Detached debug symbol archives `kvrocks-debuginfo-<arch>-<target>.tar.gz` are published as companion release assets for offline coredump analysis and `perf` profiling without restarting services.)*
+*(Note: Production packages contain stripped binaries with embedded `.gnu_debuglink`. Detached DWARF debug symbol archives (`kvrocks-debuginfo_<ver>-<iter>_<arch>.tar.gz` and `kvrocks-legacy-debuginfo_<ver>-<iter>_<arch>.tar.gz`) are published as companion release assets for offline coredump analysis and `perf` profiling without restarting services.)*
 
 ---
 
@@ -54,7 +54,7 @@ sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/kvrocks.gpg | sudo tee /etc/apt/keyrings/kvrocks.gpg > /dev/null
 
 # 2. Add repository source entry
-echo "deb [signed-by=/etc/apt/keyrings/kvrocks.gpg] https://rawvoid.github.io/kvrocks-fpm stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/kvrocks.gpg] https://rawvoid.github.io/kvrocks-fpm stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list
 sudo apt-get update
 ```
 
@@ -128,6 +128,30 @@ Test connection using `redis-cli`:
 redis-cli -p 6666 ping
 # PONG
 ```
+
+---
+
+### 4. Production Troubleshooting & Detached Symbol Debugging
+
+Production binaries are stripped (`strip --strip-unneeded`) to minimize package footprint. If a coredump occurs or you need source-line CPU profiling with `perf`, download the matching companion debug archive without restarting or altering the live service:
+
+```bash
+# 1. Download and extract companion debug symbols (example for 2.15.0-1 amd64)
+tar -xzf kvrocks-debuginfo_2.15.0-1_amd64.tar.gz
+
+# 2. Option A (Standard system debug directory, auto-discovered by GDB/perf):
+sudo mkdir -p /usr/lib/debug/usr/bin
+sudo cp kvrocks.debug /usr/lib/debug/usr/bin/
+
+# 3. Option B (Inspect coredump with explicit debug directory in GDB):
+gdb /usr/bin/kvrocks -ex "set debug-file-directory ." /var/crash/core.kvrocks
+
+# 4. Source-level CPU hotspot profiling with Linux perf:
+perf record -g -p $(pgrep kvrocks) -- sleep 30
+perf report --symfs .
+```
+
+*(Note: Production binaries have embedded `.note.gnu.build-id` and `.gnu_debuglink`. GDB, LLDB, `perf`, and `addr2line` will automatically match and verify the debug symbol file against the running binary.)*
 
 ---
 
