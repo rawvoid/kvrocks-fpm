@@ -617,18 +617,30 @@ jobs:
             fi
           done
 
-          # Post-pruning strict per-version completeness assertions
+          # Post-pruning strict per-version and per-variant completeness assertions
           for v in "${KEEP_VERSIONS[@]}"; do
-            if ! compgen -G "apt-repo/pool/main/*_${v}_*.deb" >/dev/null; then
-              echo "::error::Integrity check failed: missing DEB packages for retained version $v!"
+            if ! compgen -G "apt-repo/pool/main/kvrocks_${v}_*.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing standard DEB package for retained version $v!"
               exit 1
             fi
-            if ! compgen -G "apt-repo/rpm/x86_64/*-${v}.*.rpm" >/dev/null; then
-              echo "::error::Integrity check failed: missing x86_64 RPM packages for retained version $v!"
+            if ! compgen -G "apt-repo/pool/main/kvrocks-legacy_${v}_*.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing legacy DEB package for retained version $v!"
               exit 1
             fi
-            if ! compgen -G "apt-repo/rpm/aarch64/*-${v}.*.rpm" >/dev/null; then
-              echo "::error::Integrity check failed: missing aarch64 RPM packages for retained version $v!"
+            if ! compgen -G "apt-repo/pool/main/kvrocks_${v}_*arm64.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing arm64 DEB package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/x86_64/kvrocks-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing standard x86_64 RPM package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/x86_64/kvrocks-legacy-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing legacy x86_64 RPM package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/aarch64/kvrocks-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing aarch64 RPM package for retained version $v!"
               exit 1
             fi
           done
