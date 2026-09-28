@@ -1,0 +1,56 @@
+name: Sync Pages Assets
+
+concurrency:
+  group: pages-repository-deployment
+  cancel-in-progress: false
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/install.sh'
+  workflow_dispatch:
+
+jobs:
+  sync-pages:
+    name: Sync Static Assets to gh-pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          path: main-repo
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-branch
+
+      - name: Sync Static Assets to gh-pages
+        run: |
+          # Synchronize standalone static assets maintained in main to the root of gh-pages
+          # 1. Automated Installer Script
+          if [ -f main-repo/scripts/install.sh ]; then
+            cp main-repo/scripts/install.sh gh-pages-branch/install.sh
+          fi
+
+          cd gh-pages-branch
+
+          # Check if any tracked or untracked files changed
+          if git diff --quiet && [ -z "$(git status --porcelain)" ]; then
+            echo "Static assets on gh-pages are already up to date. Nothing to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(pages): sync static assets from main [skip ci]"
+          git push origin gh-pages
+
+          echo "Successfully synchronized static assets to gh-pages branch."

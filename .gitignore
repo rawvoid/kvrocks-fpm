@@ -13,3 +13,7 @@ SHA256SUMS
 # IDE & OS metadata
 .DS_Store
 .idea/
+
+# Cloudflare & Node.js
+.wrangler/
+node_modules/
