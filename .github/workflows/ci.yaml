@@ -479,10 +479,18 @@ jobs:
           cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
 
           # ==========================================
-          # 2. GitHub Pages Quota Retention Policy (Retain Latest 5 Releases)
+          # 2. GitHub Pages Quota Retention Policy (Retain Latest 5 Upstream Releases)
           # ==========================================
           RETENTION_LIMIT=5
-          RECENT_TAGS=$(gh release list --limit 50 --json tagName -q '.[].tagName' | grep -E '^v?[0-9]+\.' || true)
+
+          # Explicitly query GitHub Releases; FAIL-CLOSED on error to protect historical repository data
+          if ! RAW_RELEASES=$(gh release list --limit 100 --exclude-drafts --json tagName -q '.[].tagName'); then
+            echo "::error::Failed to query GitHub Releases via gh CLI! Aborting to prevent destructive pruning."
+            exit 1
+          fi
+
+          RECENT_TAGS=$(echo "$RAW_RELEASES" | grep -E '^v?[0-9]+\.' || true)
+
           # Deduplicate by upstream version so multiple revisions of the same release (e.g. 2.17.0-1, 2.17.0-2)
           # retain only the latest revision, preserving slots for 5 distinct upstream versions.
           KEEP_TAGS=$(printf "%s\n%s\n" "${RELEASE_TAG:-}" "$RECENT_TAGS" | grep -v '^$' | awk '
@@ -502,7 +510,7 @@ jobs:
           fi
 
           KEEP_VERSIONS=()
-          echo "Active retention whitelist (latest ${RETENTION_LIMIT} releases):"
+          echo "Active retention whitelist (latest ${RETENTION_LIMIT} upstream releases):"
           for tag in $KEEP_TAGS; do
             ver="${tag#v}"
             echo "  • ${tag} (version token: ${ver})"
@@ -520,6 +528,13 @@ jobs:
               echo "::error::Current release version ($CURRENT_VER) is missing from retention whitelist! Aborting."
               exit 1
             fi
+          fi
+
+          # Safety guard: If existing repository had multiple versions, prevent catastrophic drop to 1 version
+          EXISTING_VERSIONS_COUNT=$(find apt-repo-existing/pool/main -name "*.deb" 2>/dev/null | grep -oE '_[0-9]+\.[0-9]+\.[0-9]+[^_]*_' | sort -u | wc -l || true)
+          if [ "$EXISTING_VERSIONS_COUNT" -ge 3 ] && [ "${#KEEP_VERSIONS[@]}" -lt 2 ]; then
+            echo "::error::Existing repository contains ${EXISTING_VERSIONS_COUNT} versions, but calculated retention whitelist only has ${#KEEP_VERSIONS[@]}! Aborting."
+            exit 1
           fi
 
           # ==========================================
