@@ -549,8 +549,24 @@ jobs:
             fi
           fi
 
+          # Prevent iteration downgrade (e.g. attempting to build 2.17.0-1 when 2.17.0-2 already exists)
+          CURRENT_UPSTREAM="${VERSION#v}"
+          EXISTING_LATEST_TAG=$(echo "$RAW_RELEASES" | grep -E "^v?${CURRENT_UPSTREAM}-" | head -n 1 || true)
+          if [ -n "$EXISTING_LATEST_TAG" ]; then
+            EXISTING_ITER="${EXISTING_LATEST_TAG#*${CURRENT_UPSTREAM}-}"
+            if [[ "$EXISTING_ITER" =~ ^[0-9]+$ ]] && [[ "$ITERATION" =~ ^[0-9]+$ ]]; then
+              if [ "$EXISTING_ITER" -gt "$ITERATION" ]; then
+                echo "::error::Cannot downgrade package iteration! Upstream release ${CURRENT_UPSTREAM} already has iteration ${EXISTING_ITER} (${EXISTING_LATEST_TAG}), but build requested iteration ${ITERATION}. Aborting."
+                exit 1
+              fi
+            fi
+          fi
+
           # Safety guard: Whitelist size must not shrink below min(RETENTION_LIMIT, EXISTING_UPSTREAM)
-          EXISTING_UPSTREAM=$(find apt-repo-existing/pool/main -name "*.deb" 2>/dev/null | grep -oE '_[0-9]+\.[0-9]+\.[0-9]+' | sort -u | wc -l | tr -d ' ' || echo 0)
+          EXISTING_UPSTREAM=0
+          if [ -d apt-repo-existing/pool/main ]; then
+            EXISTING_UPSTREAM=$(find apt-repo-existing/pool/main -name "*.deb" 2>/dev/null | grep -oE '_[0-9]+\.[0-9]+\.[0-9]+' | sort -u | wc -l | tr -d ' ' || true)
+          fi
           EXPECTED_MIN=$(( RETENTION_LIMIT < EXISTING_UPSTREAM ? RETENTION_LIMIT : EXISTING_UPSTREAM ))
           if [ "${#KEEP_VERSIONS[@]}" -lt "$EXPECTED_MIN" ]; then
             echo "::error::Retention whitelist size (${#KEEP_VERSIONS[@]}) is smaller than expected ($EXPECTED_MIN, based on existing repository history: $EXISTING_UPSTREAM)! Aborting to prevent accidental deletion."
@@ -564,12 +580,16 @@ jobs:
             [ "$tag" = "${RELEASE_TAG:-}" ] && continue
             ver="${tag#v}"
 
-            # Check if this retained release is missing its core packages locally
-            has_deb=$(compgen -G "apt-repo/pool/main/*_${ver}_*.deb" >/dev/null && echo 1 || echo 0)
-            has_rpm_x86=$(compgen -G "apt-repo/rpm/x86_64/*-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
-            has_rpm_arm=$(compgen -G "apt-repo/rpm/aarch64/*-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
+            # Check if all required package variants are present locally
+            has_deb_v3=$(compgen -G "apt-repo/pool/main/kvrocks_${ver}_*amd64.deb" >/dev/null && echo 1 || echo 0)
+            has_deb_legacy=$(compgen -G "apt-repo/pool/main/kvrocks-legacy_${ver}_*amd64.deb" >/dev/null && echo 1 || echo 0)
+            has_deb_arm=$(compgen -G "apt-repo/pool/main/kvrocks_${ver}_*arm64.deb" >/dev/null && echo 1 || echo 0)
+            has_rpm_v3=$(compgen -G "apt-repo/rpm/x86_64/kvrocks-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
+            has_rpm_legacy=$(compgen -G "apt-repo/rpm/x86_64/kvrocks-legacy-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
+            has_rpm_arm=$(compgen -G "apt-repo/rpm/aarch64/kvrocks-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
 
-            if [ "$has_deb" = "1" ] && [ "$has_rpm_x86" = "1" ] && [ "$has_rpm_arm" = "1" ]; then
+            if [ "$has_deb_v3" = "1" ] && [ "$has_deb_legacy" = "1" ] && [ "$has_deb_arm" = "1" ] && \
+               [ "$has_rpm_v3" = "1" ] && [ "$has_rpm_legacy" = "1" ] && [ "$has_rpm_arm" = "1" ]; then
               continue
             fi
 
@@ -628,13 +648,31 @@ jobs:
             fi
           done
 
-          # Invariant 2: Whitelist Liveness Guarantee
-          # Every version declared in KEEP_VERSIONS must remain present in repository
+          # Invariant 2: Full-Variant Completeness Guarantee
+          # Every version declared in KEEP_VERSIONS must retain all 6 required package variants
           for v in "${KEEP_VERSIONS[@]}"; do
-            deb_count=$(find apt-repo/pool/main -name "*_${v}_*.deb" 2>/dev/null | wc -l)
-            rpm_count=$(find apt-repo/rpm -name "*-${v}.*.rpm" 2>/dev/null | wc -l)
-            if [ "$deb_count" -lt 1 ] && [ "$rpm_count" -lt 1 ]; then
-              echo "::error::Anti-prune violation: Whitelisted version $v has ZERO packages remaining after pruning!"
+            if ! compgen -G "apt-repo/pool/main/kvrocks_${v}_*amd64.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing standard amd64 DEB package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/pool/main/kvrocks-legacy_${v}_*amd64.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing legacy amd64 DEB package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/pool/main/kvrocks_${v}_*arm64.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing arm64 DEB package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/x86_64/kvrocks-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing standard x86_64 RPM package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/x86_64/kvrocks-legacy-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing legacy x86_64 RPM package for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/aarch64/kvrocks-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing aarch64 RPM package for retained version $v!"
               exit 1
             fi
           done
