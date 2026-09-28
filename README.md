@@ -16,6 +16,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
 - **Production Log Management**: Native daily date-based log rotation (`kvrocks_YYYY-MM-DD.log`) with automated 30-day retention cleanup (`log-retention-days 30`).
+- **Upstream Configuration Baseline**: Retains pristine official template at `/usr/share/doc/kvrocks/kvrocks.conf.default` for instant diffing and auditability.
 - **Automated Checksums**: Every release includes `SHA256SUMS` for integrity verification.
 
 ---
@@ -134,11 +135,17 @@ redis-cli -p 6666 ping
 | :--- | :--- |
 | `/usr/bin/kvrocks` | Main Kvrocks server binary |
 | `/usr/bin/kvrocks2redis` | Data migration utility to sync Kvrocks to Redis |
-| `/etc/kvrocks/kvrocks.conf` | Configuration file (protected during package upgrades) |
+| `/etc/kvrocks/kvrocks.conf` | Active production configuration (protected during package upgrades) |
+| `/usr/share/doc/kvrocks/kvrocks.conf.default` | Pristine upstream configuration reference (for diffing & auditing) |
 | `/lib/systemd/system/kvrocks.service` (DEB) / `/usr/lib/systemd/system/kvrocks.service` (RPM) | Systemd service unit |
 | `/var/lib/kvrocks/` | Working & database storage directory (owned by `kvrocks:kvrocks`) |
 | `/var/log/kvrocks/` | Server log directory (`kvrocks_YYYY-MM-DD.log`, owned by `kvrocks:kvrocks`) |
-| `/usr/share/doc/kvrocks/` | License and Notice documentation |
+| `/usr/share/doc/kvrocks/` | License, Notice, and upstream reference documentation |
+
+> **Tip**: You can compare your active configuration against the pristine upstream defaults with colored output at any time:
+> ```bash
+> diff -u --color /usr/share/doc/kvrocks/kvrocks.conf.default /etc/kvrocks/kvrocks.conf
+> ```
 
 ---
 

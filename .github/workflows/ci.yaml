@@ -153,8 +153,14 @@ jobs:
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
           python3 packaging/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
 
-          # License & Notice
+          # License, Notice & Pristine Upstream Configuration Reference
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
+          cp kvrocks/kvrocks.conf rootfs/usr/share/doc/kvrocks/kvrocks.conf.default
+
+          # Display colored unified diff in a collapsible group
+          echo "::group::View Configuration Diff (Upstream vs Patched)"
+          diff -u --color=always rootfs/usr/share/doc/kvrocks/kvrocks.conf.default rootfs/etc/kvrocks/kvrocks.conf || true
+          echo "::endgroup::"
 
       - name: Validate Patched Configuration (Dry-Run)
         run: |
