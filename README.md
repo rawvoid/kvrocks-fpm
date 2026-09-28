@@ -17,7 +17,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
 - **Production Log Management**: Native daily date-based log rotation (`kvrocks_YYYY-MM-DD.log`) with automated 30-day retention cleanup (`log-retention-days 30`).
 - **Upstream Configuration Baseline**: Retains pristine official template at `/usr/share/doc/kvrocks/kvrocks.conf.default` for instant diffing and auditability.
-- **Automated Checksums**: Every release includes `SHA256SUMS` for integrity verification.
+- **Automated Checksums & Detached Debug Symbols**: Every release includes `SHA256SUMS` and companion debug symbol archives (`kvrocks-debuginfo-*.tar.gz`) for non-intrusive production coredump and profiling analysis.
 
 ---
 
@@ -28,6 +28,8 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 | `kvrocks_<ver>-<iter>_amd64.deb`<br>`kvrocks-<ver>-<iter>.x86_64.rpm` | `x86_64` | `x86-64-v3` (AVX2) | **Default** - Optimized for modern servers (Intel Haswell+, AMD Zen+). |
 | `kvrocks-legacy_<ver>-<iter>_amd64.deb`<br>`kvrocks-legacy-<ver>-<iter>.x86_64.rpm` | `x86_64` | `legacy` (x86-64-v1) | Baseline compatibility for older CPUs/VMs without AVX2. |
 | `kvrocks_<ver>-<iter>_arm64.deb`<br>`kvrocks-<ver>-<iter>.aarch64.rpm` | `aarch64` | `generic` | 64-bit ARM (AWS Graviton, Aliyun/Tencent ARM, Kunpeng, etc.). |
+
+*(Note: Production packages contain stripped binaries with embedded `.gnu_debuglink`. Detached debug symbol archives `kvrocks-debuginfo-<arch>-<target>.tar.gz` are published as companion release assets for offline coredump analysis and `perf` profiling without restarting services.)*
 
 ---
 

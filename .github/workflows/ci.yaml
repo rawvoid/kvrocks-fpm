@@ -137,6 +137,31 @@ jobs:
           echo "### Binary Compatibility (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
           echo "- Highest GLIBC symbol required: \`${MAX_GLIBC}\`" >> $GITHUB_STEP_SUMMARY
 
+      - name: Separate Debug Symbols & Strip Binaries
+        run: |
+          DEBUGINFO_NAME="kvrocks-debuginfo-${{ matrix.arch }}-${{ matrix.cpu_target }}.tar.gz"
+          echo "DEBUGINFO_NAME=${DEBUGINFO_NAME}" >> $GITHUB_ENV
+
+          echo "=== Extracting detached debug symbols ==="
+          objcopy --only-keep-debug kvrocks/build/kvrocks kvrocks/build/kvrocks.debug
+          objcopy --only-keep-debug kvrocks/build/kvrocks2redis kvrocks/build/kvrocks2redis.debug
+
+          echo "=== Stripping production binaries ==="
+          strip --strip-unneeded kvrocks/build/kvrocks
+          strip --strip-unneeded kvrocks/build/kvrocks2redis
+
+          echo "=== Embedding debuglink into binaries ==="
+          objcopy --add-gnu-debuglink=kvrocks/build/kvrocks.debug kvrocks/build/kvrocks
+          objcopy --add-gnu-debuglink=kvrocks/build/kvrocks2redis.debug kvrocks/build/kvrocks2redis
+
+          echo "=== Archiving debug symbols ==="
+          tar -czf "${DEBUGINFO_NAME}" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
+          ls -lh "${DEBUGINFO_NAME}" kvrocks/build/kvrocks kvrocks/build/kvrocks2redis
+
+          echo "### Binary Stripping & Detached Debuginfo (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
+          echo "- Stripped binary size: \`$(du -h kvrocks/build/kvrocks | cut -f1)\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Detached debug archive: \`${DEBUGINFO_NAME}\` (\`$(du -h ${DEBUGINFO_NAME} | cut -f1)\`)" >> $GITHUB_STEP_SUMMARY
+
       - name: Prepare Packaging RootFS
         run: |
           mkdir -p rootfs/usr/bin
@@ -245,6 +270,7 @@ jobs:
           path: |
             *.deb
             *.rpm
+            *.tar.gz
             glibc-symbols-*.txt
           if-no-files-found: error
 
@@ -292,7 +318,7 @@ jobs:
       - name: Generate Checksums & Consolidate Glibc Symbols
         run: |
           cd dist
-          sha256sum *.deb *.rpm > SHA256SUMS
+          sha256sum *.deb *.rpm *.tar.gz > SHA256SUMS
           cat SHA256SUMS
           cat glibc-symbols-*.txt 2>/dev/null | sort -Vu > glibc-symbols.txt || true
 
