@@ -498,42 +498,53 @@ jobs:
             cp -n apt-repo-existing/rpm/aarch64/*.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
           fi
 
-          # Backfill historical releases if any arch has missing packages
-          TOTAL_RELEASES=$(gh release list --limit 100 --json tagName -q '.[].tagName' | grep '^v' | wc -l)
-          X86_COUNT=$(find apt-repo/rpm/x86_64 -name "*.rpm" 2>/dev/null | wc -l)
-          ARM_COUNT=$(find apt-repo/rpm/aarch64 -name "*.rpm" 2>/dev/null | wc -l)
-
-          if [ "$X86_COUNT" -lt "$TOTAL_RELEASES" ] || [ "$ARM_COUNT" -lt "$TOTAL_RELEASES" ]; then
-            echo "Syncing historical release RPMs (x86_64: $X86_COUNT, aarch64: $ARM_COUNT, releases: $TOTAL_RELEASES)..."
-            for tag in $(gh release list --limit 100 --json tagName -q '.[].tagName'); do
-              [ "$tag" = "${RELEASE_TAG:-}" ] && continue
-              mkdir -p /tmp/backfill-"$tag"
-              if gh release download "$tag" --pattern "*.rpm" --dir /tmp/backfill-"$tag" 2>/dev/null; then
-                for rpm in /tmp/backfill-"$tag"/*.rpm; do
-                  [ -f "$rpm" ] || continue
-                  case "$rpm" in
-                    *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
-                    *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
-                  esac
-                done
-              fi
-              rm -rf /tmp/backfill-"$tag"
-            done
-          fi
-
           # Copy newly built (and signed) rpm packages
           cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
           cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
+
+          # Backfill historical releases if missing from rpm repository
+          for tag in $(gh release list --limit 100 --json tagName -q '.[].tagName'); do
+            echo "$tag" | grep -Eq '^v?[0-9]+\.' || continue
+            [ "$tag" = "${RELEASE_TAG:-}" ] && continue
+            ver="${tag#v}"
+
+            # Check if packages for this release version already exist in repository
+            if compgen -G "apt-repo/rpm/x86_64/*${ver}*.rpm" >/dev/null && \
+               compgen -G "apt-repo/rpm/aarch64/*${ver}*.rpm" >/dev/null; then
+              continue
+            fi
+
+            echo "Backfilling missing RPM packages for release $tag..."
+            mkdir -p "/tmp/backfill-${tag}"
+            if gh release download "$tag" --pattern "*.rpm" --dir "/tmp/backfill-${tag}" 2>/dev/null; then
+              for rpm in "/tmp/backfill-${tag}"/*.rpm; do
+                [ -f "$rpm" ] || continue
+                case "$rpm" in
+                  *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
+                  *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
+                esac
+              done
+            fi
+            rm -rf "/tmp/backfill-${tag}"
+          done
+
+          # Configure RPM macros for package signing
+          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
+          else
+            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
+          fi
 
           # Ensure all packages in repository have valid signatures
           for arch in x86_64 aarch64; do
             for rpm in apt-repo/rpm/"$arch"/*.rpm; do
               [ -f "$rpm" ] || continue
-              if ! rpm -K --define '_pkgverify_level all' "$rpm" | grep -q 'signatures OK'; then
+              if ! verify_out=$(rpm -K --define '_pkgverify_level all' "$rpm" 2>&1) || ! echo "$verify_out" | grep -q 'signatures OK'; then
                 echo "Signing package: $(basename "$rpm")"
-                rpmsign --addsign "$rpm"
-                if ! rpm -K --define '_pkgverify_level all' "$rpm" | grep -q 'signatures OK'; then
-                  echo "::error::Failed to sign package $rpm!"
+                rpmsign --resign "$rpm"
+                if ! verify_out=$(rpm -K --define '_pkgverify_level all' "$rpm" 2>&1) || ! echo "$verify_out" | grep -q 'signatures OK'; then
+                  echo "::error::Failed to sign package $rpm! Verification output: $verify_out"
                   exit 1
                 fi
               fi

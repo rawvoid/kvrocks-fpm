@@ -97,7 +97,7 @@ sudo curl -fsSL https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo -o /etc/yum.r
   sudo dnf install -y kvrocks-legacy
   ```
 
-*(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files. Upgrades and flavor switches automatically restart the service if it is currently running, and preserve the inactive state if it is stopped.)*
+*(Note: In RPM packages, `kvrocks` and `kvrocks-legacy` define mutual Conflicts and Provides (without Obsoletes) to allow manual switching between variants while preventing package managers from inadvertently replacing standard builds. Upgrades and flavor switches automatically restart the service if running, and preserve the inactive state if stopped.)*
 
 ---
 
