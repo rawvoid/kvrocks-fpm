@@ -45,7 +45,19 @@ is_debian_derivative() {
     esac
     for like in $OS_LIKE; do
         case "$like" in
-            debian|ubuntu) return 0 ;;
+            *debian*|*ubuntu*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+is_rhel_derivative() {
+    case "$OS_ID" in
+        rhel|centos|rocky|almalinux|fedora|amzn|ol) return 0 ;;
+    esac
+    for like in $OS_LIKE; do
+        case "$like" in
+            *rhel*|*centos*|*fedora*) return 0 ;;
         esac
     done
     return 1
@@ -80,31 +92,44 @@ EOF
     OS_ID="${ID:-}"
     OS_LIKE="${ID_LIKE:-}"
 
-    if ! is_debian_derivative; then
+    OS_FAMILY=""
+    if is_debian_derivative; then
+        OS_FAMILY="debian"
+    elif is_rhel_derivative; then
+        OS_FAMILY="rhel"
+    else
         warn "Unsupported operating system family: $OS_ID ($OS_LIKE)"
-        error "This automated installer currently supports Debian/Ubuntu derivatives only. For RPM systems, please download from GitHub Releases."
+        error "This automated installer supports Debian/Ubuntu and RHEL/CentOS/Rocky/Alma/Fedora systems. For other distributions, please download packages from GitHub Releases."
     fi
 
-    info "Operating System: ${NAME:-Linux} ${VERSION_ID:-}"
+    info "Operating System: ${NAME:-Linux} ${VERSION_ID:-} (${OS_FAMILY} family)"
 
     # 3. Detect System Architecture & CPU capabilities
     RAW_ARCH="$(uname -m)"
     case "$RAW_ARCH" in
         x86_64|amd64)
-            ARCH="amd64"
+            if [ "$OS_FAMILY" = "debian" ]; then
+                ARCH="amd64"
+            else
+                ARCH="x86_64"
+            fi
             ;;
         aarch64|arm64)
-            ARCH="arm64"
+            if [ "$OS_FAMILY" = "debian" ]; then
+                ARCH="arm64"
+            else
+                ARCH="aarch64"
+            fi
             ;;
         *)
-            error "Unsupported system architecture: $RAW_ARCH. Kvrocks packages are available for amd64 and arm64."
+            error "Unsupported system architecture: $RAW_ARCH. Kvrocks packages are available for x86_64/amd64 and aarch64/arm64."
             ;;
     esac
 
     TARGET_PACKAGE="kvrocks"
-    CPU_DETAIL="Standard (aarch64)"
+    CPU_DETAIL="Standard (${ARCH})"
 
-    if [ "$ARCH" = "amd64" ]; then
+    if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ]; then
         # Check if host CPU supports x86-64-v3 (AVX2 and BMI2)
         if grep -qw "avx2" /proc/cpuinfo 2>/dev/null && \
            grep -qw "bmi2" /proc/cpuinfo 2>/dev/null; then
@@ -121,19 +146,19 @@ EOF
         FLAVOR="$(echo "$KVROCKS_FLAVOR" | tr '[:upper:]' '[:lower:]')"
         case "$FLAVOR" in
             generic)
-                if [ "$ARCH" = "arm64" ]; then
+                if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
                     TARGET_PACKAGE="kvrocks"
-                    CPU_DETAIL="Standard (aarch64)"
+                    CPU_DETAIL="Standard (${ARCH})"
                 else
                     TARGET_PACKAGE="kvrocks-legacy"
                     CPU_DETAIL="Forced Legacy (generic) by KVROCKS_FLAVOR"
                 fi
                 ;;
             legacy|v1)
-                if [ "$ARCH" = "arm64" ]; then
-                    warn "Legacy flavor is only available for amd64 architecture. Using default kvrocks package for arm64."
+                if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+                    warn "Legacy flavor is only available for x86_64/amd64 architecture. Using default kvrocks package for ${ARCH}."
                     TARGET_PACKAGE="kvrocks"
-                    CPU_DETAIL="Standard (aarch64)"
+                    CPU_DETAIL="Standard (${ARCH})"
                 else
                     TARGET_PACKAGE="kvrocks-legacy"
                     CPU_DETAIL="Forced Legacy by KVROCKS_FLAVOR"
@@ -153,52 +178,92 @@ EOF
     info "Detected CPU Feature Level: ${CPU_DETAIL}"
     info "Selected Target Package: ${BOLD}${TARGET_PACKAGE}${NC}"
 
-    # 4. Configure APT Repository
     REPO_URL="${KVROCKS_REPO_URL:-https://rawvoid.github.io/kvrocks-fpm}"
-    REPO_LIST="/etc/apt/sources.list.d/kvrocks.list"
-    KEYRING_DIR="/etc/apt/keyrings"
-    KEYRING_FILE="${KEYRING_DIR}/kvrocks.gpg"
 
-    info "Configuring APT repository: ${REPO_URL}"
-    mkdir -p /etc/apt/sources.list.d
-    install -m 0755 -d "$KEYRING_DIR"
+    if [ "$OS_FAMILY" = "debian" ]; then
+        # 4. Configure APT Repository
+        REPO_LIST="/etc/apt/sources.list.d/kvrocks.list"
+        KEYRING_DIR="/etc/apt/keyrings"
+        KEYRING_FILE="${KEYRING_DIR}/kvrocks.gpg"
 
-    info "Fetching repository GPG signing key..."
-    TMP_KEY="$(mktemp)"
-    trap 'rm -f "$TMP_KEY"' EXIT
+        info "Configuring APT repository: ${REPO_URL}"
+        mkdir -p /etc/apt/sources.list.d
+        install -m 0755 -d "$KEYRING_DIR"
 
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${REPO_URL}/kvrocks.gpg" -o "$TMP_KEY"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$TMP_KEY" "${REPO_URL}/kvrocks.gpg"
-    else
-        error "Neither curl nor wget is available. Please install curl or wget."
-    fi
+        info "Fetching repository GPG signing key..."
+        TMP_KEY="$(mktemp)"
+        trap 'rm -f "$TMP_KEY"' EXIT
 
-    if [ ! -s "$TMP_KEY" ] || head -c 256 "$TMP_KEY" | grep -qiE '(<html|<!doctype)'; then
-        error "Downloaded GPG signing key is invalid, empty, or an HTML error page."
-    fi
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "${REPO_URL}/kvrocks.gpg" -o "$TMP_KEY"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO "$TMP_KEY" "${REPO_URL}/kvrocks.gpg"
+        else
+            error "Neither curl nor wget is available. Please install curl or wget."
+        fi
 
-    install -m 0644 "$TMP_KEY" "$KEYRING_FILE"
-    rm -f "$TMP_KEY"
-    trap - EXIT
+        if [ ! -s "$TMP_KEY" ] || head -c 256 "$TMP_KEY" | grep -qiE '(<html|<!doctype)'; then
+            error "Downloaded GPG signing key is invalid, empty, or an HTML error page."
+        fi
 
-    # Write repository source entry
-    cat > "$REPO_LIST" << EOF
+        install -m 0644 "$TMP_KEY" "$KEYRING_FILE"
+        rm -f "$TMP_KEY"
+        trap - EXIT
+
+        # Write repository source entry
+        cat > "$REPO_LIST" << EOF
 # Apache Kvrocks Repository
 deb [arch=${ARCH} signed-by=${KEYRING_FILE}] ${REPO_URL} stable main
 EOF
-    chmod 0644 "$REPO_LIST"
+        chmod 0644 "$REPO_LIST"
 
-    # 5. Update APT cache and install package
-    info "Updating package lists..."
-    if ! apt-get update; then
-        warn "apt-get update encountered issues (possibly from other repositories). Attempting to proceed..."
+        # 5. Update APT cache and install package
+        info "Updating package lists..."
+        if ! apt-get update; then
+            warn "apt-get update encountered issues (possibly from other repositories). Attempting to proceed..."
+        fi
+
+        info "Installing ${TARGET_PACKAGE}..."
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -y "${TARGET_PACKAGE}"
+
+    elif [ "$OS_FAMILY" = "rhel" ]; then
+        # 4. Configure RPM (YUM / DNF) Repository
+        if command -v dnf >/dev/null 2>&1; then
+            PKG_MGR="dnf"
+        elif command -v yum >/dev/null 2>&1; then
+            PKG_MGR="yum"
+        else
+            error "Neither dnf nor yum was found on this RPM-based system."
+        fi
+
+        REPO_FILE="/etc/yum.repos.d/kvrocks.repo"
+        info "Configuring RPM repository: ${REPO_URL}/kvrocks.repo"
+        mkdir -p /etc/yum.repos.d
+
+        TMP_REPO="$(mktemp)"
+        trap 'rm -f "$TMP_REPO"' EXIT
+
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "${REPO_URL}/kvrocks.repo" -o "$TMP_REPO"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO "$TMP_REPO" "${REPO_URL}/kvrocks.repo"
+        else
+            error "Neither curl nor wget is available. Please install curl or wget."
+        fi
+
+        if [ ! -s "$TMP_REPO" ] || head -c 256 "$TMP_REPO" | grep -qiE '(<html|<!doctype)'; then
+            error "Downloaded repository configuration is invalid, empty, or an HTML error page."
+        fi
+
+        install -m 0644 "$TMP_REPO" "$REPO_FILE"
+        rm -f "$TMP_REPO"
+        trap - EXIT
+
+        # 5. Install package via DNF / YUM
+        info "Installing ${TARGET_PACKAGE} via ${PKG_MGR}..."
+        "$PKG_MGR" install -y "${TARGET_PACKAGE}"
     fi
-
-    info "Installing ${TARGET_PACKAGE}..."
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get install -y "${TARGET_PACKAGE}"
 
     # 6. Installation verification and summary
     if command -v kvrocks >/dev/null 2>&1; then

@@ -10,8 +10,8 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **CPU Microarchitecture Optimization**:
   - **Performance Default (`x86-64-v3`)**: Compiled with `-march=x86-64-v3 -mpclmul -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2, PCLMUL) for modern servers (~15-30% higher RocksDB throughput).
   - **Compatibility (`legacy`)**: Baseline `x86-64-v1` compatibility (`PORTABLE=1`) for older CPUs/VMs without AVX2.
-- **Secure Debian / Ubuntu APT Repository**: Hosted on GitHub Pages with automated GPG signing (SecureApt), index updates, and multi-version management.
-- **CPU-Aware One-Click Installer**: Automatically detects host CPU instruction sets (AVX2/BMI2) and installs the optimal package.
+- **Dual APT & RPM Repositories**: Hosted on GitHub Pages with automated GPG signing (SecureApt & RPM/repomd detached signatures), index updates, and multi-version management.
+- **Universal CPU-Aware One-Click Installer**: Automatically detects host CPU instruction sets (AVX2/BMI2) and Linux distribution family (Debian/Ubuntu & RHEL/Rocky/Alma/Fedora), installing the optimal package variant.
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
@@ -35,9 +35,9 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 
 ## 🚀 Installation & Usage
 
-### 1. One-Click Automated Install (Debian / Ubuntu)
+### 1. One-Click Automated Install (Debian, Ubuntu, RHEL, Rocky, AlmaLinux, Fedora)
 
-The installer automatically detects your CPU capabilities (AVX2/BMI2) and architecture, configures the APT repository, and installs the fastest compatible variant:
+The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), configures the appropriate repository (APT or YUM/DNF), and installs the fastest compatible package variant:
 
 ```bash
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
@@ -70,11 +70,34 @@ sudo apt-get update
   sudo apt-get install -y kvrocks-legacy
   ```
 
+---
+
+### 3. RedHat / Rocky / AlmaLinux / Fedora RPM Repository (Manual Setup)
+
+#### Step 1: Add RPM Repository Configuration
+```bash
+sudo curl -fsSL https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo -o /etc/yum.repos.d/kvrocks.repo
+```
+
+*(Note: The repository configuration automatically enables `gpgcheck=1` and `repo_gpgcheck=1` using our official public key at `https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc`.)*
+
+#### Step 2: Install Target Package
+
+* **Standard / Modern x86_64 & ARM64 installation** (Default with AVX2/v3 on x86_64):
+  ```bash
+  sudo dnf install -y kvrocks
+  ```
+
+* **Legacy installation** (for older x86_64 machines without AVX2):
+  ```bash
+  sudo dnf install -y kvrocks-legacy
+  ```
+
 *(Note: `kvrocks` and `kvrocks-legacy` provide mutual conflict and replace rules, allowing seamless switching without orphaned files. Upgrades and flavor switches automatically restart the service if it is currently running, and preserve the inactive state if it is stopped.)*
 
 ---
 
-### 3. Manual Package Installation (`.deb` / `.rpm`)
+### 4. Manual Package Installation (`.deb` / `.rpm`)
 
 #### Debian / Ubuntu (`.deb`)
 ```bash
@@ -129,9 +152,7 @@ redis-cli -p 6666 ping
 # PONG
 ```
 
----
-
-### 4. Production Troubleshooting & Detached Symbol Debugging
+## 🔍 Production Troubleshooting & Detached Symbol Debugging
 
 Production binaries are stripped (`strip --strip-unneeded`) to minimize package footprint. If a coredump occurs or you need source-line CPU profiling with `perf`, download the matching companion debug archive without restarting or altering the live service:
 

@@ -338,6 +338,47 @@ jobs:
           echo "RELEASE_TAG=v${VERSION}-${ITERATION}" >> $GITHUB_ENV
           echo "RELEASE_NAME=Kvrocks ${VERSION}-${ITERATION}" >> $GITHUB_ENV
 
+      - name: Setup GPG & Sign RPM Packages
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "::error::GPG_PRIVATE_KEY secret is not set! Repository and package signing cannot proceed."
+            exit 1
+          fi
+
+          sudo apt-get update
+          sudo apt-get install -y rpm gnupg
+
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "allow-loopback-pinentry" > ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)
+          echo "Loaded GPG signing key: $GPG_KEY_ID"
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+
+          # Configure RPM macros for package signing
+          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
+            chmod 600 /tmp/gpg_passphrase
+            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
+          else
+            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
+          fi
+
+          echo "Signing RPM packages in dist/..."
+          rpmsign --addsign dist/*.rpm
+          rm -f /tmp/gpg_passphrase
+
+          echo "Verifying RPM package signatures..."
+          sudo rpm --import <(gpg --armor --export "$GPG_KEY_ID")
+          rpm -K dist/*.rpm
+
       - name: Generate Checksums & Consolidate Glibc Symbols
         run: |
           cd dist
@@ -355,39 +396,47 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout gh-pages for APT Repo History
+      - name: Checkout gh-pages for Repo History
         uses: actions/checkout@v4
         continue-on-error: true
         with:
           ref: gh-pages
           path: apt-repo-existing
 
-      - name: Build Debian APT Repository
+      - name: Build Debian APT & RPM Repositories
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils gnupg
+          sudo apt-get install -y dpkg-dev apt-utils createrepo-c
 
           mkdir -p apt-repo/pool/main
           mkdir -p apt-repo/dists/stable/main/binary-amd64
           mkdir -p apt-repo/dists/stable/main/binary-arm64
-
-          # Verify and import GPG signing key
-          if [ -z "$GPG_PRIVATE_KEY" ]; then
-            echo "::error::GPG_PRIVATE_KEY secret is not set! SecureApt repository signing cannot proceed."
-            exit 1
-          fi
-
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)
-          echo "Loaded GPG signing key: $GPG_KEY_ID"
+          mkdir -p apt-repo/rpm/x86_64
+          mkdir -p apt-repo/rpm/aarch64
 
           # Export public key to repository root for clients
           gpg --batch --yes --export "$GPG_KEY_ID" > apt-repo/kvrocks.gpg
           gpg --batch --yes --armor --export "$GPG_KEY_ID" > apt-repo/kvrocks.asc
 
+          # Copy installer script to root
+          cp scripts/install.sh apt-repo/install.sh
+
+          # Generate YUM / DNF client repository configuration file
+          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=https://rawvoid.github.io/kvrocks-fpm/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\n' > apt-repo/kvrocks.repo
+
+          # Prevent GitHub Pages from ignoring or filtering repository files
+          touch apt-repo/.nojekyll
+
+          GPG_SIGN_ARGS=(--batch --yes --digest-algo SHA512 --default-key "$GPG_KEY_ID")
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            GPG_SIGN_ARGS+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+          fi
+
+          # ==========================================
+          # 1. Debian APT Repository Processing
+          # ==========================================
           # Preserve existing debs if available
           if [ -d apt-repo-existing/pool/main ]; then
             cp -n apt-repo-existing/pool/main/*.deb apt-repo/pool/main/ 2>/dev/null || true
@@ -396,45 +445,97 @@ jobs:
           # Copy newly built deb packages
           cp dist/*.deb apt-repo/pool/main/
 
-          # Copy installer script to root
-          cp scripts/install.sh apt-repo/install.sh
-
-          # Prevent GitHub Pages from ignoring or filtering repository files
-          touch apt-repo/.nojekyll
-
           # Scan packages and generate index files (with -m for multiversion index)
-          cd apt-repo
-          dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
-          gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+          (
+            cd apt-repo
+            dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
+            gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
 
-          dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
-          gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
+            dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
+            gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
 
-          # Generate Release metadata
-          cd dists/stable
-          apt-ftparchive \
-            -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
-            -o APT::FTPArchive::Release::Label="Kvrocks" \
-            -o APT::FTPArchive::Release::Suite="stable" \
-            -o APT::FTPArchive::Release::Codename="stable" \
-            -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
-            -o APT::FTPArchive::Release::Components="main" \
-            -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository" \
-            release . > Release
+            # Generate Release metadata
+            cd dists/stable
+            apt-ftparchive \
+              -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
+              -o APT::FTPArchive::Release::Label="Kvrocks" \
+              -o APT::FTPArchive::Release::Suite="stable" \
+              -o APT::FTPArchive::Release::Codename="stable" \
+              -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
+              -o APT::FTPArchive::Release::Components="main" \
+              -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository" \
+              release . > Release
 
-          # Sign Release metadata: InRelease (inline) and Release.gpg (detached)
-          GPG_SIGN_ARGS=(--batch --yes --digest-algo SHA512 --default-key "$GPG_KEY_ID")
-          if [ -n "$GPG_PASSPHRASE" ]; then
-            GPG_SIGN_ARGS+=(--pinentry-mode loopback --passphrase "$GPG_PASSPHRASE")
+            # Sign Release metadata: InRelease (inline) and Release.gpg (detached)
+            echo "Signing APT Release metadata..."
+            gpg "${GPG_SIGN_ARGS[@]}" --clearsign -o InRelease Release
+            gpg "${GPG_SIGN_ARGS[@]}" -abs -o Release.gpg Release
+          )
+
+          # ==========================================
+          # 2. RPM (YUM / DNF) Repository Processing
+          # ==========================================
+          # Preserve existing rpms if available
+          if [ -d apt-repo-existing/rpm/x86_64 ]; then
+            cp -n apt-repo-existing/rpm/x86_64/*.rpm apt-repo/rpm/x86_64/ 2>/dev/null || true
+          fi
+          if [ -d apt-repo-existing/rpm/aarch64 ]; then
+            cp -n apt-repo-existing/rpm/aarch64/*.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
           fi
 
-          echo "Signing Release metadata..."
-          gpg "${GPG_SIGN_ARGS[@]}" --clearsign -o InRelease Release
-          gpg "${GPG_SIGN_ARGS[@]}" -abs -o Release.gpg Release
+          # Backfill historical RPM packages from existing GitHub releases if rpm repo is not yet populated
+          if [ ! -d apt-repo-existing/rpm/x86_64 ] || [ -z "$(ls -A apt-repo-existing/rpm/x86_64 2>/dev/null)" ]; then
+            echo "Initial RPM repository setup: backfilling existing release RPMs..."
+            for tag in $(gh release list -L 15 --json tagName -q '.[].tagName'); do
+              mkdir -p /tmp/backfill-"$tag"
+              if gh release download "$tag" --pattern "*.rpm" --dir /tmp/backfill-"$tag" 2>/dev/null; then
+                for rpm in /tmp/backfill-"$tag"/*.rpm; do
+                  [ -f "$rpm" ] || continue
+                  if ! rpm -K "$rpm" 2>&1 | grep -q "digests signatures OK"; then
+                    echo "Signing backfilled RPM: $(basename "$rpm")"
+                    if [ -n "$GPG_PASSPHRASE" ]; then
+                      echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
+                    fi
+                    rpmsign --addsign "$rpm" || true
+                    rm -f /tmp/gpg_passphrase
+                  fi
+                  case "$rpm" in
+                    *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
+                    *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
+                  esac
+                done
+              fi
+              rm -rf /tmp/backfill-"$tag"
+            done
+          fi
 
-          cd ../..
+          # Copy newly built (and signed) rpm packages
+          cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/ 2>/dev/null || true
+          cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
 
-      - name: Deploy APT Repository to GitHub Pages
+          # Generate metadata with createrepo_c
+          echo "Generating RPM metadata for x86_64..."
+          createrepo_c --update apt-repo/rpm/x86_64/
+          echo "Generating RPM metadata for aarch64..."
+          createrepo_c --update apt-repo/rpm/aarch64/
+
+          # Sign repomd.xml with GPG (detached ASCII armor) for repo_gpgcheck=1
+          echo "Signing RPM repomd.xml metadata..."
+          gpg "${GPG_SIGN_ARGS[@]}" --detach-sign --armor -o apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
+          gpg "${GPG_SIGN_ARGS[@]}" --detach-sign --armor -o apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
+
+          # Verify metadata signature
+          echo "Verifying RPM repomd.xml signatures..."
+          gpg --verify apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
+          gpg --verify apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
+
+          echo "### Dual APT & RPM Repositories Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- **APT Repository**: \`https://rawvoid.github.io/kvrocks-fpm stable main\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **RPM Repository**: \`https://rawvoid.github.io/kvrocks-fpm/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **YUM / DNF Repo Config**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **GPG Public Key (ASCII)**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Deploy Repositories to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
