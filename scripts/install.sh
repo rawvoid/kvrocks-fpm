@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Apache Kvrocks Automated Installer for Debian/Ubuntu Systems
+# Apache Kvrocks Automated Installer for Linux Systems (Debian/Ubuntu/RHEL/CentOS/Rocky/Alma/Fedora)
 # Detects CPU capabilities (AVX2/BMI2) and installs the optimal package variant.
 #
 # Usage:
