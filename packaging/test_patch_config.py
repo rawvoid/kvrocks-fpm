@@ -89,6 +89,30 @@ class TestPatchConfig(unittest.TestCase):
         patch_directive(self.conf_path, "daemonize", "no")
         self.assertIn("daemonize no\n", self._read_conf())
 
+    def test_production_patches(self):
+        initial = (
+            "dir /tmp/kvrocks\n"
+            "# log-dir /tmp/kvrocks,stdout\n"
+            "log-retention-days -1\n"
+            "daemonize yes\n"
+            "# supervised no\n"
+        )
+        self._write_conf(initial)
+        patches = {
+            "dir": "/var/lib/kvrocks",
+            "log-dir": "/var/log/kvrocks",
+            "log-retention-days": "30",
+            "daemonize": "no",
+            "supervised": "systemd",
+        }
+        patch_config(self.conf_path, patches)
+        content = self._read_conf()
+        self.assertIn("dir /var/lib/kvrocks\n", content)
+        self.assertIn("log-dir /var/log/kvrocks\n", content)
+        self.assertIn("log-retention-days 30\n", content)
+        self.assertIn("daemonize no\n", content)
+        self.assertIn("supervised systemd\n", content)
+
     def test_nonexistent_file_exits(self):
         import io
         from contextlib import redirect_stderr

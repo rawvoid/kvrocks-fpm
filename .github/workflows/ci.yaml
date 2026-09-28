@@ -141,7 +141,6 @@ jobs:
         run: |
           mkdir -p rootfs/usr/bin
           mkdir -p rootfs/etc/kvrocks
-          mkdir -p rootfs/etc/logrotate.d
           mkdir -p rootfs/var/lib/kvrocks
           mkdir -p rootfs/var/log/kvrocks
           mkdir -p rootfs/usr/share/doc/kvrocks
@@ -150,13 +149,9 @@ jobs:
           cp kvrocks/build/kvrocks rootfs/usr/bin/
           cp kvrocks/build/kvrocks2redis rootfs/usr/bin/
 
-          # Configuration with FHS paths
+          # Configuration with FHS paths and native log retention
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
           python3 packaging/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
-
-          # Logrotate configuration
-          cp packaging/logrotate/kvrocks rootfs/etc/logrotate.d/kvrocks
-          chmod 0644 rootfs/etc/logrotate.d/kvrocks
 
           # License & Notice
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
@@ -201,7 +196,6 @@ jobs:
             --deb-group root \
             -C rootfs \
             --config-files /etc/kvrocks/kvrocks.conf \
-            --config-files /etc/logrotate.d/kvrocks \
             --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \
@@ -229,7 +223,6 @@ jobs:
             --rpm-group root \
             -C rootfs \
             --config-files /etc/kvrocks/kvrocks.conf \
-            --config-files /etc/logrotate.d/kvrocks \
             --before-remove packaging/hooks/prerm.sh \
             --after-install packaging/hooks/postinst.sh \
             --after-remove packaging/hooks/postrm.sh \

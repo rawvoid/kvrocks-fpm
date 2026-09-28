@@ -67,10 +67,11 @@ def main() -> None:
 
     conf_file = sys.argv[1]
 
-    # Apply standard FHS paths and systemd supervision
+    # Apply standard FHS paths, systemd supervision and native log retention
     patches = {
         "dir": "/var/lib/kvrocks",
         "log-dir": "/var/log/kvrocks",
+        "log-retention-days": "30",
         "daemonize": "no",
         "supervised": "systemd",
     }
