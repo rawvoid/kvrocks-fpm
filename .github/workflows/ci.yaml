@@ -538,24 +538,36 @@ jobs:
           fi
 
           # ==========================================
-          # 3. Backfill Retained Historical RPMs (Only if Missing)
+          # 3. Symmetrical Backfill of Retained Historical Packages (DEB & RPM)
           # ==========================================
           for tag in $KEEP_TAGS; do
             [ "$tag" = "${RELEASE_TAG:-}" ] && continue
             ver="${tag#v}"
-            if compgen -G "apt-repo/rpm/x86_64/*${ver}*.rpm" >/dev/null && \
-               compgen -G "apt-repo/rpm/aarch64/*${ver}*.rpm" >/dev/null; then
+
+            # Verify presence of all expected package variants using exact delimited patterns
+            has_deb_v3=$(compgen -G "apt-repo/pool/main/kvrocks_${ver}_*.deb" >/dev/null && echo 1 || echo 0)
+            has_deb_legacy=$(compgen -G "apt-repo/pool/main/kvrocks-legacy_${ver}_*.deb" >/dev/null && echo 1 || echo 0)
+            has_deb_arm=$(compgen -G "apt-repo/pool/main/kvrocks_${ver}_*arm64.deb" >/dev/null && echo 1 || echo 0)
+            has_rpm_v3=$(compgen -G "apt-repo/rpm/x86_64/kvrocks-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
+            has_rpm_legacy=$(compgen -G "apt-repo/rpm/x86_64/kvrocks-legacy-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
+            has_rpm_arm=$(compgen -G "apt-repo/rpm/aarch64/kvrocks-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
+
+            if [ "$has_deb_v3" = "1" ] && [ "$has_deb_legacy" = "1" ] && [ "$has_deb_arm" = "1" ] && \
+               [ "$has_rpm_v3" = "1" ] && [ "$has_rpm_legacy" = "1" ] && [ "$has_rpm_arm" = "1" ]; then
               continue
             fi
 
-            echo "Backfilling missing RPM packages for retained release $tag..."
+            echo "Backfilling missing DEB/RPM packages for retained release $tag..."
             mkdir -p "/tmp/backfill-${tag}"
-            if gh release download "$tag" --pattern "*.rpm" --dir "/tmp/backfill-${tag}" 2>/dev/null; then
-              for rpm in "/tmp/backfill-${tag}"/*.rpm; do
-                [ -f "$rpm" ] || continue
-                case "$rpm" in
-                  *.x86_64.rpm) cp -n "$rpm" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
-                  *.aarch64.rpm) cp -n "$rpm" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
+            if ! gh release download "$tag" --pattern "*.deb" --pattern "*.rpm" --dir "/tmp/backfill-${tag}"; then
+              echo "::warning::Failed to download backfill packages for retained release $tag from GitHub Releases!"
+            else
+              for pkg in "/tmp/backfill-${tag}"/*; do
+                [ -f "$pkg" ] || continue
+                case "$pkg" in
+                  *.deb) cp -n "$pkg" apt-repo/pool/main/ 2>/dev/null || true ;;
+                  *.x86_64.rpm) cp -n "$pkg" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
+                  *.aarch64.rpm) cp -n "$pkg" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
                 esac
               done
             fi
@@ -586,7 +598,22 @@ jobs:
             fi
           done
 
-          # Post-pruning safety assertions: verify repository integrity
+          # Post-pruning strict per-version completeness assertions
+          for v in "${KEEP_VERSIONS[@]}"; do
+            if ! compgen -G "apt-repo/pool/main/*_${v}_*.deb" >/dev/null; then
+              echo "::error::Integrity check failed: missing DEB packages for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/x86_64/*-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing x86_64 RPM packages for retained version $v!"
+              exit 1
+            fi
+            if ! compgen -G "apt-repo/rpm/aarch64/*-${v}.*.rpm" >/dev/null; then
+              echo "::error::Integrity check failed: missing aarch64 RPM packages for retained version $v!"
+              exit 1
+            fi
+          done
+
           REMAINING_DEBS=$(find apt-repo/pool/main -name "*.deb" 2>/dev/null | wc -l)
           REMAINING_X86_RPMS=$(find apt-repo/rpm/x86_64 -name "*.rpm" 2>/dev/null | wc -l)
           REMAINING_ARM_RPMS=$(find apt-repo/rpm/aarch64 -name "*.rpm" 2>/dev/null | wc -l)
