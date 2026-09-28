@@ -1,0 +1,19 @@
+{
+  "name": "kvrocks-repo-gateway",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker edge gateway for Apache Kvrocks APT & RPM package repository",
+  "type": "module",
+  "scripts": {
+    "test": "node --test worker.test.js",
+    "deploy": "npx wrangler deploy"
+  },
+  "keywords": [
+    "kvrocks",
+    "apt",
+    "rpm",
+    "cloudflare-worker",
+    "reverse-proxy"
+  ],
+  "author": "rawvoid",
+  "license": "Apache-2.0"
+}

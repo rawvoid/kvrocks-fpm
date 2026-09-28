@@ -428,28 +428,13 @@ jobs:
           echo "- **Status**: Draft release \`${{ env.RELEASE_TAG }}\` created on GitHub Releases." >> $GITHUB_STEP_SUMMARY
           echo "- **Note**: Deployment to GitHub Pages skipped. Draft releases are not published to online APT/RPM repositories." >> $GITHUB_STEP_SUMMARY
 
-      - name: Checkout gh-pages for Repo History
-        if: inputs.draft != true && inputs.draft != 'true'
-        uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          ref: gh-pages
-          path: apt-repo-existing
-
       - name: Build Debian APT & RPM Repositories
         if: inputs.draft != true && inputs.draft != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          KVROCKS_GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
         run: |
-          # Abort if remote gh-pages branch exists but checkout failed, preventing repository history wipeout
-          if git ls-remote --heads origin gh-pages | grep -q 'refs/heads/gh-pages'; then
-            if [ ! -d apt-repo-existing/.git ] && [ ! -d apt-repo-existing/pool ]; then
-              echo "::error::Remote gh-pages branch exists but checkout failed! Aborting build to protect existing packages."
-              exit 1
-            fi
-          fi
-
+          sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm
 
           mkdir -p apt-repo/pool/main
@@ -467,7 +452,9 @@ jobs:
 
           # Copy installer script and generate client repo config
           cp scripts/install.sh apt-repo/install.sh
-          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=https://rawvoid.github.io/kvrocks-fpm/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\n' > apt-repo/kvrocks.repo
+
+          GATEWAY_URL="${KVROCKS_GATEWAY_URL:-https://kvrocks.kryo.eu.org}"
+          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" > apt-repo/kvrocks.repo
           touch apt-repo/.nojekyll
 
           # Prepare GPG base arguments with secure passphrase file handling
@@ -479,226 +466,13 @@ jobs:
             GPG_BASE_ARGS+=(--pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase)
           fi
 
-          # ==========================================
-          # 1. Collect Existing Packages & Newly Built Artifacts
-          # ==========================================
-          if [ -d apt-repo-existing/pool/main ]; then
-            cp -n apt-repo-existing/pool/main/*.deb apt-repo/pool/main/ 2>/dev/null || true
-          fi
-          if [ -d apt-repo-existing/rpm/x86_64 ]; then
-            cp -n apt-repo-existing/rpm/x86_64/*.rpm apt-repo/rpm/x86_64/ 2>/dev/null || true
-          fi
-          if [ -d apt-repo-existing/rpm/aarch64 ]; then
-            cp -n apt-repo-existing/rpm/aarch64/*.rpm apt-repo/rpm/aarch64/ 2>/dev/null || true
-          fi
-
-          # Copy newly built packages for current release
+          # Stage newly built packages from dist/
           cp dist/*.deb apt-repo/pool/main/
           cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
           cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
 
           # ==========================================
-          # 2. GitHub Pages Quota Retention Policy (Retain Latest 5 Upstream Releases)
-          # ==========================================
-          RETENTION_LIMIT=5
-
-          # Explicitly query GitHub Releases; FAIL-CLOSED on error to protect historical repository data
-          if ! RAW_RELEASES=$(gh release list --limit 100 --exclude-drafts --json tagName -q '.[].tagName'); then
-            echo "::error::Failed to query GitHub Releases via gh CLI! Aborting to prevent destructive pruning."
-            exit 1
-          fi
-
-          RECENT_TAGS=$(echo "$RAW_RELEASES" | grep -E '^v?[0-9]+\.' || true)
-
-          # Deduplicate by upstream version so multiple revisions of the same release (e.g. 2.17.0-1, 2.17.0-2)
-          # retain only the latest revision, preserving slots for 5 distinct upstream versions.
-          KEEP_TAGS=$(printf "%s\n%s\n" "${RELEASE_TAG:-}" "$RECENT_TAGS" | grep -v '^$' | awk '
-          {
-            tag = $0;
-            sub(/^v/, "", tag);
-            split(tag, parts, "-");
-            upstream = parts[1];
-            if (!seen[upstream]++) {
-              print $0;
-            }
-          }' | head -n "$RETENTION_LIMIT")
-
-          if [ -z "$KEEP_TAGS" ]; then
-            echo "::error::Failed to resolve retention whitelist! Aborting to protect repository data."
-            exit 1
-          fi
-
-          KEEP_VERSIONS=()
-          echo "Active retention whitelist (latest ${RETENTION_LIMIT} upstream releases):"
-          for tag in $KEEP_TAGS; do
-            ver="${tag#v}"
-            echo "  • ${tag} (version token: ${ver})"
-            KEEP_VERSIONS+=("$ver")
-          done
-
-          # Safety check: ensure current version is explicitly in KEEP_VERSIONS
-          CURRENT_VER="${RELEASE_TAG#v}"
-          if [ -n "$CURRENT_VER" ]; then
-            found_current=0
-            for v in "${KEEP_VERSIONS[@]}"; do
-              [ "$v" = "$CURRENT_VER" ] && found_current=1 && break
-            done
-            if [ "$found_current" -ne 1 ]; then
-              echo "::error::Current release version ($CURRENT_VER) is missing from retention whitelist! Aborting."
-              exit 1
-            fi
-          fi
-
-          # Prevent iteration downgrade (e.g. attempting to build 2.17.0-1 when 2.17.0-2 already exists)
-          CURRENT_UPSTREAM="${VERSION#v}"
-          EXISTING_LATEST_TAG=$(echo "$RAW_RELEASES" | grep -E "^v?${CURRENT_UPSTREAM}-" | head -n 1 || true)
-          if [ -n "$EXISTING_LATEST_TAG" ]; then
-            EXISTING_ITER="${EXISTING_LATEST_TAG#*${CURRENT_UPSTREAM}-}"
-            if [[ "$EXISTING_ITER" =~ ^[0-9]+$ ]] && [[ "$ITERATION" =~ ^[0-9]+$ ]]; then
-              if [ "$EXISTING_ITER" -gt "$ITERATION" ]; then
-                echo "::error::Cannot downgrade package iteration! Upstream release ${CURRENT_UPSTREAM} already has iteration ${EXISTING_ITER} (${EXISTING_LATEST_TAG}), but build requested iteration ${ITERATION}. Aborting."
-                exit 1
-              fi
-            fi
-          fi
-
-          # Safety guard: Whitelist size must not shrink below min(RETENTION_LIMIT, EXISTING_UPSTREAM)
-          EXISTING_UPSTREAM=0
-          if [ -d apt-repo-existing/pool/main ]; then
-            EXISTING_UPSTREAM=$(find apt-repo-existing/pool/main -name "*.deb" 2>/dev/null | grep -oE '_[0-9]+\.[0-9]+\.[0-9]+' | sort -u | wc -l | tr -d ' ' || true)
-          fi
-          EXPECTED_MIN=$(( RETENTION_LIMIT < EXISTING_UPSTREAM ? RETENTION_LIMIT : EXISTING_UPSTREAM ))
-          if [ "${#KEEP_VERSIONS[@]}" -lt "$EXPECTED_MIN" ]; then
-            echo "::error::Retention whitelist size (${#KEEP_VERSIONS[@]}) is smaller than expected ($EXPECTED_MIN, based on existing repository history: $EXISTING_UPSTREAM)! Aborting to prevent accidental deletion."
-            exit 1
-          fi
-
-          # ==========================================
-          # 3. Symmetrical Backfill of Retained Historical Packages (DEB & RPM)
-          # ==========================================
-          for tag in $KEEP_TAGS; do
-            [ "$tag" = "${RELEASE_TAG:-}" ] && continue
-            ver="${tag#v}"
-
-            # Check if all required package variants are present locally
-            has_deb_v3=$(compgen -G "apt-repo/pool/main/kvrocks_${ver}_*amd64.deb" >/dev/null && echo 1 || echo 0)
-            has_deb_legacy=$(compgen -G "apt-repo/pool/main/kvrocks-legacy_${ver}_*amd64.deb" >/dev/null && echo 1 || echo 0)
-            has_deb_arm=$(compgen -G "apt-repo/pool/main/kvrocks_${ver}_*arm64.deb" >/dev/null && echo 1 || echo 0)
-            has_rpm_v3=$(compgen -G "apt-repo/rpm/x86_64/kvrocks-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
-            has_rpm_legacy=$(compgen -G "apt-repo/rpm/x86_64/kvrocks-legacy-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
-            has_rpm_arm=$(compgen -G "apt-repo/rpm/aarch64/kvrocks-${ver}.*.rpm" >/dev/null && echo 1 || echo 0)
-
-            if [ "$has_deb_v3" = "1" ] && [ "$has_deb_legacy" = "1" ] && [ "$has_deb_arm" = "1" ] && \
-               [ "$has_rpm_v3" = "1" ] && [ "$has_rpm_legacy" = "1" ] && [ "$has_rpm_arm" = "1" ]; then
-              continue
-            fi
-
-            echo "Backfilling missing DEB/RPM packages for retained release $tag..."
-            mkdir -p "/tmp/backfill-${tag}"
-            if ! gh release download "$tag" --pattern "*.deb" --pattern "*.rpm" --dir "/tmp/backfill-${tag}"; then
-              echo "::warning::Failed to download backfill packages for retained release $tag from GitHub Releases!"
-            else
-              for pkg in "/tmp/backfill-${tag}"/*; do
-                [ -f "$pkg" ] || continue
-                case "$pkg" in
-                  *.deb) cp -n "$pkg" apt-repo/pool/main/ 2>/dev/null || true ;;
-                  *.x86_64.rpm) cp -n "$pkg" apt-repo/rpm/x86_64/ 2>/dev/null || true ;;
-                  *.aarch64.rpm) cp -n "$pkg" apt-repo/rpm/aarch64/ 2>/dev/null || true ;;
-                esac
-              done
-            fi
-            rm -rf "/tmp/backfill-${tag}"
-          done
-
-          # ==========================================
-          # 4. Safe Pruning of Packages Exceeding Retention Window
-          # ==========================================
-          is_retained() {
-            local filename="$1"
-            for v in "${KEEP_VERSIONS[@]}"; do
-              case "$filename" in
-                *_${v}_*.deb) return 0 ;;
-                *-${v}.*.rpm) return 0 ;;
-              esac
-            done
-            return 1
-          }
-
-          echo "Applying retention pruning to GitHub Pages repository..."
-          for pkg in apt-repo/pool/main/*.deb apt-repo/rpm/x86_64/*.rpm apt-repo/rpm/aarch64/*.rpm; do
-            [ -f "$pkg" ] || continue
-            pkg_name="$(basename "$pkg")"
-            if ! is_retained "$pkg_name"; then
-              echo "  [PRUNE] Removing historical package from Pages: $pkg_name"
-              rm -f "$pkg"
-            fi
-          done
-
-          # ==========================================
-          # Post-Pruning Anti-Accidental-Deletion Assertions
-          # ==========================================
-          # Invariant 1: Zero Loss of Current Build Artifacts
-          # Every package compiled and signed in dist/ MUST be present in apt-repo
-          for pkg in dist/*.deb dist/*.rpm; do
-            [ -f "$pkg" ] || continue
-            pkg_name="$(basename "$pkg")"
-            if ! find apt-repo -name "$pkg_name" -type f | grep -q .; then
-              echo "::error::Anti-prune violation: Newly built package $pkg_name was accidentally deleted by retention pruning!"
-              exit 1
-            fi
-          done
-
-          # Invariant 2: Full-Variant Completeness Guarantee
-          # Every version declared in KEEP_VERSIONS must retain all 6 required package variants
-          for v in "${KEEP_VERSIONS[@]}"; do
-            if ! compgen -G "apt-repo/pool/main/kvrocks_${v}_*amd64.deb" >/dev/null; then
-              echo "::error::Integrity check failed: missing standard amd64 DEB package for retained version $v!"
-              exit 1
-            fi
-            if ! compgen -G "apt-repo/pool/main/kvrocks-legacy_${v}_*amd64.deb" >/dev/null; then
-              echo "::error::Integrity check failed: missing legacy amd64 DEB package for retained version $v!"
-              exit 1
-            fi
-            if ! compgen -G "apt-repo/pool/main/kvrocks_${v}_*arm64.deb" >/dev/null; then
-              echo "::error::Integrity check failed: missing arm64 DEB package for retained version $v!"
-              exit 1
-            fi
-            if ! compgen -G "apt-repo/rpm/x86_64/kvrocks-${v}.*.rpm" >/dev/null; then
-              echo "::error::Integrity check failed: missing standard x86_64 RPM package for retained version $v!"
-              exit 1
-            fi
-            if ! compgen -G "apt-repo/rpm/x86_64/kvrocks-legacy-${v}.*.rpm" >/dev/null; then
-              echo "::error::Integrity check failed: missing legacy x86_64 RPM package for retained version $v!"
-              exit 1
-            fi
-            if ! compgen -G "apt-repo/rpm/aarch64/kvrocks-${v}.*.rpm" >/dev/null; then
-              echo "::error::Integrity check failed: missing aarch64 RPM package for retained version $v!"
-              exit 1
-            fi
-          done
-
-          # Invariant 3: Repository Viability (No empty architectures)
-          REMAINING_DEBS=$(find apt-repo/pool/main -name "*.deb" 2>/dev/null | wc -l)
-          REMAINING_X86_RPMS=$(find apt-repo/rpm/x86_64 -name "*.rpm" 2>/dev/null | wc -l)
-          REMAINING_ARM_RPMS=$(find apt-repo/rpm/aarch64 -name "*.rpm" 2>/dev/null | wc -l)
-          echo "Retained package counts: DEB=$REMAINING_DEBS, RPM(x86_64)=$REMAINING_X86_RPMS, RPM(aarch64)=$REMAINING_ARM_RPMS"
-
-          if [ "$REMAINING_DEBS" -lt 1 ] || [ "$REMAINING_X86_RPMS" -lt 1 ] || [ "$REMAINING_ARM_RPMS" -lt 1 ]; then
-            echo "::error::Retention pruning left one or more repository architectures empty! Aborting deployment to protect integrity."
-            exit 1
-          fi
-
-          TOTAL_PAGES_MB=$(du -sm apt-repo | cut -f1)
-          echo "Current apt-repo disk footprint: ${TOTAL_PAGES_MB} MB (Safe limit: 1000 MB)"
-          if [ "$TOTAL_PAGES_MB" -gt 950 ]; then
-            echo "::error::Repository size (${TOTAL_PAGES_MB} MB) exceeds hard safety threshold (950 MB)! Aborting deployment to protect GitHub Pages quota."
-            exit 1
-          elif [ "$TOTAL_PAGES_MB" -gt 900 ]; then
-            echo "::warning::Repository size (${TOTAL_PAGES_MB} MB) is approaching GitHub Pages 1GB limit!"
-          fi
-
-          # ==========================================
-          # 5. Build Debian APT Repository Metadata
+          # 1. Build Debian APT Repository Metadata
           # ==========================================
           (
             cd apt-repo
@@ -725,33 +499,10 @@ jobs:
           )
 
           # ==========================================
-          # 6. Build RPM Repository Metadata & Signing
+          # 2. Build RPM Repository Metadata & Signing
           # ==========================================
-          # Configure RPM macros for package signing
-          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
-          if [ -n "$GPG_PASSPHRASE" ]; then
-            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
-          else
-            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
-          fi
-
-          # Ensure all packages in repository have valid signatures
-          for arch in x86_64 aarch64; do
-            for rpm in apt-repo/rpm/"$arch"/*.rpm; do
-              [ -f "$rpm" ] || continue
-              if ! verify_out=$(rpm -K --define '_pkgverify_level all' "$rpm" 2>&1) || ! echo "$verify_out" | grep -q 'signatures OK'; then
-                echo "Signing package: $(basename "$rpm")"
-                rpmsign --resign "$rpm"
-                if ! verify_out=$(rpm -K --define '_pkgverify_level all' "$rpm" 2>&1) || ! echo "$verify_out" | grep -q 'signatures OK'; then
-                  echo "::error::Failed to sign package $rpm! Verification output: $verify_out"
-                  exit 1
-                fi
-              fi
-            done
-          done
-
-          createrepo_c --update apt-repo/rpm/x86_64/
-          createrepo_c --update apt-repo/rpm/aarch64/
+          createrepo_c apt-repo/rpm/x86_64/
+          createrepo_c apt-repo/rpm/aarch64/
 
           # RPM / repomd standardizes on SHA256 detached signature
           gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor -o apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
@@ -760,12 +511,31 @@ jobs:
           gpg --verify apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
           gpg --verify apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
 
-          echo "### Dual APT & RPM Repositories Generated" >> $GITHUB_STEP_SUMMARY
-          echo "- **APT Repository**: \`https://rawvoid.github.io/kvrocks-fpm stable main\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **RPM Repository**: \`https://rawvoid.github.io/kvrocks-fpm/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **YUM / DNF Repo Config**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **GPG Public Key (ASCII)**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Retention Policy**: Retaining latest package iteration for latest ${RETENTION_LIMIT} upstream releases on Pages (~${TOTAL_PAGES_MB} MB). All historical releases remain available on GitHub Releases." >> $GITHUB_STEP_SUMMARY
+          # ==========================================
+          # 3. Purge Binary Packages from apt-repo (Zero-Binary Hosting)
+          # ==========================================
+          # Binary packages are permanently hosted on GitHub Releases and streamed via Cloudflare Edge Gateway.
+          # GitHub Pages hosts ONLY lightweight repository metadata (<100KB), completely eliminating quota limits.
+          echo "=== Purging binary packages to keep GitHub Pages featherweight (<100KB) ==="
+          rm -rf apt-repo/pool
+          rm -f apt-repo/rpm/x86_64/*.rpm
+          rm -f apt-repo/rpm/aarch64/*.rpm
+
+          TOTAL_PAGES_KB=$(du -sk apt-repo | cut -f1)
+          echo "Total metadata repository footprint: ${TOTAL_PAGES_KB} KB"
+          if [ "$TOTAL_PAGES_KB" -gt 5000 ]; then
+            echo "::error::Metadata repository size exceeds 5MB! Check for leaked binary files."
+            exit 1
+          fi
+
+          echo "### Dual APT & RPM Metadata Repositories Generated" >> $GITHUB_STEP_SUMMARY
+          echo "- **Edge Gateway Endpoint**: \`${GATEWAY_URL}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **APT Repository (via Gateway)**: \`${GATEWAY_URL} stable main\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **YUM / DNF Repo Config**: \`${GATEWAY_URL}/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **GPG Public Key (ASCII)**: \`${GATEWAY_URL}/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, no 1GB quota limit)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Binary Asset Storage**: Hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) & stream-cached at Cloudflare Edge." >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy Repositories to GitHub Pages
         if: inputs.draft != true && inputs.draft != 'true'

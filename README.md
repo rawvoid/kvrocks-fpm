@@ -10,7 +10,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **CPU Microarchitecture Optimization**:
   - **Performance Default (`x86-64-v3`)**: Compiled with `-march=x86-64-v3 -mpclmul -O3` (enabling AVX, AVX2, BMI1/2, FMA, SSE4.2, PCLMUL) for modern servers (~15-30% higher RocksDB throughput).
   - **Compatibility (`legacy`)**: Baseline `x86-64-v1` compatibility (`PORTABLE=1`) for older CPUs/VMs without AVX2.
-- **Dual APT & RPM Repositories**: Hosted on GitHub Pages with automated GPG signing (SecureApt & RPM/repomd detached signatures), index updates, and multi-version management.
+- **Dual APT & RPM Repositories**: Streamed via global Edge Gateway with automated GPG signing (SecureApt & RPM/repomd detached signatures) and infinite version retention.
 - **Universal CPU-Aware One-Click Installer**: Automatically detects host CPU instruction sets (AVX2/BMI2) and Linux distribution family (Debian/Ubuntu & RHEL/Rocky/Alma/Fedora), installing the optimal package variant.
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
@@ -36,99 +36,17 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 ## 🚀 Installation & Usage
 
 > [!TIP]
-> **Repository Retention Policy**: Online APT and RPM repositories hosted on GitHub Pages maintain the latest package iteration for the **latest 5 upstream releases** to stay strictly within GitHub Pages storage quotas (~715 MB). All historical releases, revisions, tar archives, and detached debug symbols remain permanently accessible on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases).
+> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions.
 
 ### 1. One-Click Automated Install (Debian, Ubuntu, Fedora)
 
-The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the appropriate repository (APT or YUM/DNF), and installs the fastest compatible package variant:
+The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the repository, and installs the fastest compatible package variant:
 
 ```bash
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
 ```
 
----
-
-### 2. Debian / Ubuntu APT Repository (Manual Setup)
-
-#### Step 1: Add GPG Key and APT Repository
-```bash
-# 1. Install repository GPG signing key
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://rawvoid.github.io/kvrocks-fpm/kvrocks.gpg | sudo tee /etc/apt/keyrings/kvrocks.gpg > /dev/null
-
-# 2. Add repository source entry
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/kvrocks.gpg] https://rawvoid.github.io/kvrocks-fpm stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list
-sudo apt-get update
-```
-
-#### Step 2: Install Target Package
-
-* **Standard / Modern x86_64 & ARM64 installation** (Default with AVX2/v3 on x86_64):
-  ```bash
-  sudo apt-get install -y kvrocks
-  ```
-
-* **Legacy installation** (for older x86_64 machines without AVX2):
-  ```bash
-  sudo apt-get install -y kvrocks-legacy
-  ```
-
----
-
-### 3. Fedora & RPM Systems Repository (Manual Setup)
-
-> [!NOTE]
-> **System Requirement**: Pre-built packages are compiled on Ubuntu 22.04 and require **Glibc >= 2.35** and OpenSSL 3. They run out-of-the-box on modern RPM systems such as **Fedora 36+**.
-> Enterprise Linux 8 & 9 (RHEL, CentOS Stream, Rocky Linux, AlmaLinux) ship with Glibc 2.28 / 2.34; for EL 8/9 systems, please deploy Kvrocks via Docker/container or compile from source.
-
-#### Step 1: Add RPM Repository Configuration
-```bash
-sudo curl -fsSL https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo -o /etc/yum.repos.d/kvrocks.repo
-```
-
-*(Note: The repository configuration automatically enables `gpgcheck=1` and `repo_gpgcheck=1` using our official public key at `https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc`.)*
-
-#### Step 2: Install Target Package
-
-* **Standard / Modern x86_64 & ARM64 installation** (Default with AVX2/v3 on x86_64):
-  ```bash
-  sudo dnf install -y kvrocks
-  ```
-
-* **Legacy installation** (for older x86_64 machines without AVX2):
-  ```bash
-  sudo dnf install -y kvrocks-legacy
-  ```
-
-*(Note: In RPM packages, `kvrocks` and `kvrocks-legacy` define mutual Conflicts and Provides (without Obsoletes) to allow manual switching between variants while preventing package managers from inadvertently replacing standard builds. Upgrades and flavor switches automatically restart the service if running, and preserve the inactive state if stopped.)*
-
----
-
-### 4. Manual Package Installation (`.deb` / `.rpm`)
-
-#### Debian / Ubuntu (`.deb`)
-```bash
-# Install modern performance package (x86_64 default) or arm64
-sudo dpkg -i kvrocks_<version>-<iteration>_amd64.deb
-
-# Or install legacy compatibility package (for older CPUs without AVX2)
-sudo dpkg -i kvrocks-legacy_<version>-<iteration>_amd64.deb
-
-# Fix missing dependencies if needed
-sudo apt-get install -f
-```
-
-#### RedHat / Fedora / RPM Systems (`.rpm`)
-
-> **Note**: Packages are built on Ubuntu 22.04 (Glibc 2.35, OpenSSL 3). Target systems must satisfy the highest `GLIBC_` symbol version recorded in each release's `glibc-symbols.txt` asset, and provide OpenSSL 3 runtime (`libssl3` for deb, `libssl.so.3` for rpm).
-
-```bash
-# Install modern performance package (x86_64 default)
-sudo dnf install ./kvrocks-<version>-<iteration>.x86_64.rpm
-
-# Or install legacy compatibility package
-sudo dnf install ./kvrocks-legacy-<version>-<iteration>.x86_64.rpm
-```
+*(Note: Upgrades and flavor switches automatically restart the service if running, and preserve the inactive state if stopped.)*
 
 ---
 

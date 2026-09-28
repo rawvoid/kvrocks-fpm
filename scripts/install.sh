@@ -64,6 +64,8 @@ is_rhel_derivative() {
 }
 
 main() {
+    REPO_URL="${KVROCKS_REPO_URL:-https://kvrocks.kryo.eu.org}"
+
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
         error "This script must be run as root. Please run: curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash"
@@ -193,8 +195,6 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
     info "Hardware Architecture: ${ARCH}"
     info "Detected CPU Feature Level: ${CPU_DETAIL}"
     info "Selected Target Package: ${BOLD}${TARGET_PACKAGE}${NC}"
-
-    REPO_URL="${KVROCKS_REPO_URL:-https://rawvoid.github.io/kvrocks-fpm}"
 
     if [ "$OS_FAMILY" = "debian" ]; then
         # 4. Configure APT Repository
