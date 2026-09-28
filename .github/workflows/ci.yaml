@@ -112,7 +112,7 @@ jobs:
 
           git clone --depth 1 -b v${{ env.VERSION }} https://github.com/apache/kvrocks.git
           cd kvrocks
-          ./x.py build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" ${{ matrix.cmake_flags }} -j $(nproc)
+          ./x.py build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" ${{ matrix.cmake_flags }} -j $(nproc)
           
           ccache -s
 
@@ -156,7 +156,7 @@ jobs:
 
           echo "=== Quality Gate: Verifying Debug Symbols & Build IDs ==="
           # 1. Verify DWARF debug sections exist
-          if ! readelf -S kvrocks/build/kvrocks.debug | grep -q '\.debug_info'; then
+          if ! readelf -S kvrocks/build/kvrocks.debug 2>/dev/null | grep -q '\.debug_info'; then
             echo "::error::kvrocks.debug does not contain .debug_info! DWARF symbol generation failed."
             exit 1
           fi
@@ -164,7 +164,7 @@ jobs:
 
           # 2. Verify binary and detached debuginfo share the exact same GNU Build ID
           KV_BIN_ID=$(readelf -n kvrocks/build/kvrocks | awk '/Build ID:/{print $3}')
-          KV_DBG_ID=$(readelf -n kvrocks/build/kvrocks.debug | awk '/Build ID:/{print $3}')
+          KV_DBG_ID=$(readelf -n kvrocks/build/kvrocks.debug 2>/dev/null | awk '/Build ID:/{print $3}')
           echo "Kvrocks GNU Build ID: ${KV_BIN_ID}"
           if [ -z "$KV_BIN_ID" ] || [ "$KV_BIN_ID" != "$KV_DBG_ID" ]; then
             echo "::error::Build ID mismatch! Binary (${KV_BIN_ID}) != Debug (${KV_DBG_ID})"
@@ -295,6 +295,7 @@ jobs:
             *.rpm
             *.tar.gz
             glibc-symbols-*.txt
+          retention-days: 1
           if-no-files-found: error
 
   publish-release:
