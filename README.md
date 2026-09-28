@@ -36,7 +36,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 ## 🚀 Installation & Usage
 
 > [!TIP]
-> **Repository Retention Policy**: Online APT and RPM repositories hosted on GitHub Pages maintain the **latest 5 releases** to stay strictly within GitHub Pages storage quotas (~715 MB). All historical releases, tar archives, and detached debug symbols remain permanently accessible on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases).
+> **Repository Retention Policy**: Online APT and RPM repositories hosted on GitHub Pages maintain the latest package iteration for the **latest 5 upstream releases** to stay strictly within GitHub Pages storage quotas (~715 MB). All historical releases, revisions, tar archives, and detached debug symbols remain permanently accessible on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases).
 
 ### 1. One-Click Automated Install (Debian, Ubuntu, Fedora)
 

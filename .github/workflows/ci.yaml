@@ -482,8 +482,19 @@ jobs:
           # 2. GitHub Pages Quota Retention Policy (Retain Latest 5 Releases)
           # ==========================================
           RETENTION_LIMIT=5
-          RECENT_TAGS=$(gh release list --limit 30 --json tagName -q '.[].tagName' | grep -E '^v?[0-9]+\.' || true)
-          KEEP_TAGS=$(printf "%s\n%s\n" "${RELEASE_TAG:-}" "$RECENT_TAGS" | grep -v '^$' | awk '!seen[$0]++' | head -n "$RETENTION_LIMIT")
+          RECENT_TAGS=$(gh release list --limit 50 --json tagName -q '.[].tagName' | grep -E '^v?[0-9]+\.' || true)
+          # Deduplicate by upstream version so multiple revisions of the same release (e.g. 2.17.0-1, 2.17.0-2)
+          # retain only the latest revision, preserving slots for 5 distinct upstream versions.
+          KEEP_TAGS=$(printf "%s\n%s\n" "${RELEASE_TAG:-}" "$RECENT_TAGS" | grep -v '^$' | awk '
+          {
+            tag = $0;
+            sub(/^v/, "", tag);
+            split(tag, parts, "-");
+            upstream = parts[1];
+            if (!seen[upstream]++) {
+              print $0;
+            }
+          }' | head -n "$RETENTION_LIMIT")
 
           if [ -z "$KEEP_TAGS" ]; then
             echo "::error::Failed to resolve retention whitelist! Aborting to protect repository data."
