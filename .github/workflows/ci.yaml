@@ -1,5 +1,9 @@
 name: Release Packages
 
+concurrency:
+  group: pages-repository-deployment
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +16,11 @@ on:
         type: string
         required: true
         default: '1'
+      draft:
+        description: 'Create as Draft Release (do not publish to GitHub Pages)'
+        type: boolean
+        required: true
+        default: false
       publish_release:
         description: 'Publish release to GitHub Releases'
         type: boolean
@@ -406,12 +415,21 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
+          draft: ${{ inputs.draft == true || inputs.draft == 'true' }}
           files: dist/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Report Draft Release Status
+        if: inputs.draft == true || inputs.draft == 'true'
+        run: |
+          echo "### Draft Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Draft release \`${{ env.RELEASE_TAG }}\` created on GitHub Releases." >> $GITHUB_STEP_SUMMARY
+          echo "- **Note**: Deployment to GitHub Pages skipped. Draft releases are not published to online APT/RPM repositories." >> $GITHUB_STEP_SUMMARY
+
       - name: Checkout gh-pages for Repo History
+        if: inputs.draft != true && inputs.draft != 'true'
         uses: actions/checkout@v4
         continue-on-error: true
         with:
@@ -419,6 +437,7 @@ jobs:
           path: apt-repo-existing
 
       - name: Build Debian APT & RPM Repositories
+        if: inputs.draft != true && inputs.draft != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
@@ -626,7 +645,10 @@ jobs:
 
           TOTAL_PAGES_MB=$(du -sm apt-repo | cut -f1)
           echo "Current apt-repo disk footprint: ${TOTAL_PAGES_MB} MB (Safe limit: 1000 MB)"
-          if [ "$TOTAL_PAGES_MB" -gt 900 ]; then
+          if [ "$TOTAL_PAGES_MB" -gt 950 ]; then
+            echo "::error::Repository size (${TOTAL_PAGES_MB} MB) exceeds hard safety threshold (950 MB)! Aborting deployment to protect GitHub Pages quota."
+            exit 1
+          elif [ "$TOTAL_PAGES_MB" -gt 900 ]; then
             echo "::warning::Repository size (${TOTAL_PAGES_MB} MB) is approaching GitHub Pages 1GB limit!"
           fi
 
@@ -698,10 +720,12 @@ jobs:
           echo "- **RPM Repository**: \`https://rawvoid.github.io/kvrocks-fpm/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **YUM / DNF Repo Config**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GPG Public Key (ASCII)**: \`https://rawvoid.github.io/kvrocks-fpm/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Retention Policy**: Retaining latest ${RETENTION_LIMIT} releases on Pages (~${TOTAL_PAGES_MB} MB). All historical releases remain available on GitHub Releases." >> $GITHUB_STEP_SUMMARY
+          echo "- **Retention Policy**: Retaining latest package iteration for latest ${RETENTION_LIMIT} upstream releases on Pages (~${TOTAL_PAGES_MB} MB). All historical releases remain available on GitHub Releases." >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy Repositories to GitHub Pages
+        if: inputs.draft != true && inputs.draft != 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./apt-repo
+          keep_files: false
