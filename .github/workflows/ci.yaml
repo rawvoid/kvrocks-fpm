@@ -198,6 +198,9 @@ jobs:
             --iteration "${{ env.ITERATION }}" \
             -a "${{ matrix.arch }}" \
             -d "libssl3" \
+            --category "database" \
+            --vendor "Rawvoid" \
+            --maintainer "Rawvoid <rawvoid@users.noreply.github.com>" \
             --deb-user root \
             --deb-group root \
             -C rootfs \
@@ -225,6 +228,9 @@ jobs:
             --iteration "${{ env.ITERATION }}" \
             -a "${{ matrix.rpm_arch }}" \
             -d "libssl.so.3()(64bit)" \
+            --category "database" \
+            --vendor "Rawvoid" \
+            --maintainer "Rawvoid <rawvoid@users.noreply.github.com>" \
             --rpm-user root \
             --rpm-group root \
             -C rootfs \
