@@ -11,13 +11,13 @@ set -euo pipefail
 
 # Visual formatting (disabled if not in a terminal or NO_COLOR is set)
 if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    CYAN='\033[0;36m'
-    BOLD='\033[1m'
-    NC='\033[0m'
+    RED=$'\033[0;31m'
+    GREEN=$'\033[0;32m'
+    YELLOW=$'\033[1;33m'
+    BLUE=$'\033[0;34m'
+    CYAN=$'\033[0;36m'
+    BOLD=$'\033[1m'
+    NC=$'\033[0m'
 else
     RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
 fi
@@ -37,6 +37,36 @@ warn() {
 error() {
     printf "${RED}[ERROR]${NC} %s\n" "$1" >&2
     exit 1
+}
+
+fetch_file() {
+    local url="$1"
+    local dest="$2"
+    local mode="${3:-0644}"
+
+    local tmp_file
+    tmp_file="$(mktemp)"
+    trap 'rm -f "$tmp_file"' EXIT
+
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL "$url" -o "$tmp_file"; then
+            error "Failed to download $url using curl."
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -qO "$tmp_file" "$url"; then
+            error "Failed to download $url using wget."
+        fi
+    else
+        error "Neither curl nor wget is available. Please install curl or wget."
+    fi
+
+    if [ ! -s "$tmp_file" ] || head -c 256 "$tmp_file" | grep -qiE '(<html|<!doctype)'; then
+        error "Downloaded file from $url is invalid, empty, or an HTML error page."
+    fi
+
+    install -m "$mode" "$tmp_file" "$dest"
+    rm -f "$tmp_file"
+    trap - EXIT
 }
 
 is_debian_derivative() {
@@ -68,7 +98,7 @@ main() {
 
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
-        error "This script must be run as root. Please run: curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash"
+        error "This script must be run as root. Please run: curl -fsSL ${REPO_URL}/install.sh | sudo bash"
     fi
 
     printf '%b' "${CYAN}${BOLD}"
@@ -91,8 +121,8 @@ EOF
     # shellcheck source=/dev/null
     . /etc/os-release
 
-    OS_ID="${ID:-}"
-    OS_LIKE="${ID_LIKE:-}"
+    OS_ID="$(echo "${ID:-}" | tr '[:upper:]' '[:lower:]')"
+    OS_LIKE="$(echo "${ID_LIKE:-}" | tr '[:upper:]' '[:lower:]')"
 
     OS_FAMILY=""
     if is_debian_derivative; then
@@ -184,7 +214,11 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
                 ;;
             default|v3|avx2)
                 TARGET_PACKAGE="kvrocks"
-                CPU_DETAIL="Forced Default (v3) by KVROCKS_FLAVOR"
+                if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+                    CPU_DETAIL="Standard (${ARCH})"
+                else
+                    CPU_DETAIL="Forced Default (v3) by KVROCKS_FLAVOR"
+                fi
                 ;;
             *)
                 warn "Unrecognized KVROCKS_FLAVOR '${KVROCKS_FLAVOR}'. Using detected target: ${TARGET_PACKAGE}"
@@ -207,24 +241,7 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
         install -m 0755 -d "$KEYRING_DIR"
 
         info "Fetching repository GPG signing key..."
-        TMP_KEY="$(mktemp)"
-        trap 'rm -f "$TMP_KEY"' EXIT
-
-        if command -v curl >/dev/null 2>&1; then
-            curl -fsSL "${REPO_URL}/kvrocks.gpg" -o "$TMP_KEY"
-        elif command -v wget >/dev/null 2>&1; then
-            wget -qO "$TMP_KEY" "${REPO_URL}/kvrocks.gpg"
-        else
-            error "Neither curl nor wget is available. Please install curl or wget."
-        fi
-
-        if [ ! -s "$TMP_KEY" ] || head -c 256 "$TMP_KEY" | grep -qiE '(<html|<!doctype)'; then
-            error "Downloaded GPG signing key is invalid, empty, or an HTML error page."
-        fi
-
-        install -m 0644 "$TMP_KEY" "$KEYRING_FILE"
-        rm -f "$TMP_KEY"
-        trap - EXIT
+        fetch_file "${REPO_URL}/kvrocks.gpg" "$KEYRING_FILE" 0644
 
         # Write repository source entry
         cat > "$REPO_LIST" << EOF
@@ -241,7 +258,7 @@ EOF
 
         info "Installing ${TARGET_PACKAGE}..."
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -y "${TARGET_PACKAGE}"
+        apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "${TARGET_PACKAGE}"
 
     elif [ "$OS_FAMILY" = "rhel" ]; then
         # 4. Configure RPM (YUM / DNF) Repository
@@ -261,25 +278,8 @@ EOF
         mkdir -p /etc/yum.repos.d "$KEY_DIR"
 
         info "Fetching repository GPG signing key..."
-        TMP_KEY="$(mktemp)"
-        trap 'rm -f "$TMP_KEY"' EXIT
-
-        if command -v curl >/dev/null 2>&1; then
-            curl -fsSL "${REPO_URL}/kvrocks.asc" -o "$TMP_KEY"
-        elif command -v wget >/dev/null 2>&1; then
-            wget -qO "$TMP_KEY" "${REPO_URL}/kvrocks.asc"
-        else
-            error "Neither curl nor wget is available. Please install curl or wget."
-        fi
-
-        if [ ! -s "$TMP_KEY" ] || head -c 256 "$TMP_KEY" | grep -qiE '(<html|<!doctype)'; then
-            error "Downloaded GPG signing key is invalid, empty, or an HTML error page."
-        fi
-
-        install -m 0644 "$TMP_KEY" "$KEY_FILE"
+        fetch_file "${REPO_URL}/kvrocks.asc" "$KEY_FILE" 0644
         rpm --import "$KEY_FILE" 2>/dev/null || true
-        rm -f "$TMP_KEY"
-        trap - EXIT
 
         # Write repository configuration dynamically using REPO_URL
         cat > "$REPO_FILE" << EOF
@@ -289,18 +289,25 @@ baseurl=${REPO_URL}/rpm/\$basearch/
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1
-gpgkey=${REPO_URL}/kvrocks.asc
+gpgkey=file://${KEY_FILE}
+       ${REPO_URL}/kvrocks.asc
 EOF
         chmod 0644 "$REPO_FILE"
 
         # 5. Install package via DNF / YUM
         info "Installing ${TARGET_PACKAGE} via ${PKG_MGR}..."
-        "$PKG_MGR" install -y "${TARGET_PACKAGE}"
+        if [ "$PKG_MGR" = "dnf" ]; then
+            "$PKG_MGR" install -y --refresh --allowerasing "${TARGET_PACKAGE}"
+        else
+            "$PKG_MGR" makecache || true
+            "$PKG_MGR" install -y "${TARGET_PACKAGE}"
+        fi
     fi
 
     # 6. Installation verification and summary
-    if command -v kvrocks >/dev/null 2>&1; then
-        if INSTALLED_VER="$(kvrocks --version 2>&1 || kvrocks -v 2>&1)"; then
+    KVROCKS_BIN="$(command -v kvrocks 2>/dev/null || ([ -x /usr/bin/kvrocks ] && echo "/usr/bin/kvrocks") || echo "")"
+    if [ -n "$KVROCKS_BIN" ]; then
+        if INSTALLED_VER="$("$KVROCKS_BIN" --version 2>&1)" || INSTALLED_VER="$("$KVROCKS_BIN" -v 2>&1)"; then
             success "Kvrocks successfully installed: ${INSTALLED_VER}"
         else
             error "Kvrocks package was installed, but binary failed to execute!
@@ -308,14 +315,19 @@ Dynamic linker or runtime dependency error:
 ${INSTALLED_VER}"
         fi
     else
-        error "Package installation command completed, but /usr/bin/kvrocks binary was not found."
+        error "Package installation command completed, but kvrocks binary was not found in PATH or /usr/bin/."
     fi
 
     printf '\n%b%b=== Getting Started with Apache Kvrocks ===%b\n' "${GREEN}" "${BOLD}" "${NC}"
-    printf '  • Start service:   %b\n' "${CYAN}sudo systemctl start kvrocks${NC}"
-    printf '  • Enable autostart:%b\n' "${CYAN}sudo systemctl enable kvrocks${NC}"
-    printf '  • Check status:    %b\n' "${CYAN}sudo systemctl status kvrocks${NC}"
-    printf '  • View logs:       %b\n' "${CYAN}sudo journalctl -u kvrocks -f${NC}"
+    if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+        printf '  • Start service:   %b\n' "${CYAN}sudo systemctl start kvrocks${NC}"
+        printf '  • Enable autostart:%b\n' "${CYAN}sudo systemctl enable kvrocks${NC}"
+        printf '  • Check status:    %b\n' "${CYAN}sudo systemctl status kvrocks${NC}"
+        printf '  • View logs:       %b\n' "${CYAN}sudo journalctl -u kvrocks -f${NC}"
+    else
+        printf '  • Start service:   %b\n' "${CYAN}kvrocks /etc/kvrocks/kvrocks.conf${NC}"
+        printf '  • View logs:       %b\n' "${CYAN}tail -f /var/log/kvrocks/kvrocks_*.log${NC}"
+    fi
     printf '  • Connect:         %b\n' "${CYAN}redis-cli -p 6666 ping${NC}"
     printf '  • Configuration:   %b\n\n' "${CYAN}/etc/kvrocks/kvrocks.conf${NC}"
 }
