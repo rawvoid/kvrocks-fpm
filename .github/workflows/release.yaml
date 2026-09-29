@@ -96,6 +96,9 @@ jobs:
     name: Build & Package (${{ matrix.arch }}, ${{ matrix.cpu_target }})
     needs: preflight
     runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.preflight.outputs.version }}
+      ITERATION: ${{ needs.preflight.outputs.iteration }}
     strategy:
       fail-fast: false
       matrix:
@@ -105,7 +108,6 @@ jobs:
             arch: amd64
             rpm_arch: x86_64
             cpu_target: v3
-            cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
             pkg_suffix: ""
             deb_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy"
@@ -116,7 +118,6 @@ jobs:
             arch: amd64
             rpm_arch: x86_64
             cpu_target: legacy
-            cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-O3"
             pkg_suffix: "-legacy"
             deb_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks"
@@ -127,7 +128,6 @@ jobs:
             arch: arm64
             rpm_arch: aarch64
             cpu_target: generic
-            cmake_flags: "-DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON"
             extra_flags: "-O3"
             pkg_suffix: ""
             deb_extra_args: ""
@@ -151,33 +151,6 @@ jobs:
           restore-keys: |
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
 
-      - name: Resolve Version & Iteration
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_ITERATION: ${{ inputs.iteration }}
-        run: |
-          VERSION="${INPUT_VERSION#v}"
-          ITERATION="${INPUT_ITERATION}"
-
-          if [ -z "$VERSION" ]; then
-            echo "::error::Version must be explicitly provided!"
-            exit 1
-          fi
-
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "::error::Version must match semantic versioning format (e.g. 2.15.0)!"
-            exit 1
-          fi
-
-          if ! echo "$ITERATION" | grep -Eq '^[0-9A-Za-z.+~]+$'; then
-            echo "::error::Iteration must be a valid package revision token (e.g. 1)!"
-            exit 1
-          fi
-
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "ITERATION=$ITERATION" >> $GITHUB_ENV
-          echo "Resolved version: $VERSION, iteration: $ITERATION"
-
       - name: Build Kvrocks
         run: |
           export PATH="/usr/lib/ccache:$PATH"
@@ -191,7 +164,7 @@ jobs:
 
           git clone --depth 1 -b v${{ env.VERSION }} https://github.com/apache/kvrocks.git
           cd kvrocks
-          ./x.py build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" ${{ matrix.cmake_flags }} -j $(nproc)
+          ./x.py build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" -DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON -j $(nproc)
           
           ccache -s
 
@@ -220,18 +193,13 @@ jobs:
           DEBUGINFO_NAME="kvrocks${{ matrix.pkg_suffix }}-debuginfo_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.tar.gz"
           echo "DEBUGINFO_NAME=${DEBUGINFO_NAME}" >> $GITHUB_ENV
 
-          echo "=== Extracting detached debug symbols ==="
-          objcopy --only-keep-debug kvrocks/build/kvrocks kvrocks/build/kvrocks.debug
-          objcopy --only-keep-debug kvrocks/build/kvrocks2redis kvrocks/build/kvrocks2redis.debug
-          chmod 0644 kvrocks/build/kvrocks.debug kvrocks/build/kvrocks2redis.debug
-
-          echo "=== Stripping production binaries ==="
-          strip --strip-unneeded kvrocks/build/kvrocks
-          strip --strip-unneeded kvrocks/build/kvrocks2redis
-
-          echo "=== Embedding debuglink into binaries ==="
-          objcopy --add-gnu-debuglink=kvrocks/build/kvrocks.debug kvrocks/build/kvrocks
-          objcopy --add-gnu-debuglink=kvrocks/build/kvrocks2redis.debug kvrocks/build/kvrocks2redis
+          echo "=== Extracting detached debug symbols, stripping, and embedding debuglink ==="
+          for bin in kvrocks kvrocks2redis; do
+            objcopy --only-keep-debug "kvrocks/build/${bin}" "kvrocks/build/${bin}.debug"
+            chmod 0644 "kvrocks/build/${bin}.debug"
+            strip --strip-unneeded "kvrocks/build/${bin}"
+            objcopy --add-gnu-debuglink="kvrocks/build/${bin}.debug" "kvrocks/build/${bin}"
+          done
 
           echo "=== Quality Gate: Verifying Debug Symbols & Build IDs ==="
           # 1. Verify DWARF debug sections exist
@@ -384,6 +352,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
+      RELEASE_NAME: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      ITERATION: ${{ needs.preflight.outputs.iteration }}
     steps:
       - uses: actions/checkout@v4
 
@@ -392,32 +365,6 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-
-      - name: Resolve Release Tag & Name
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_ITERATION: ${{ inputs.iteration }}
-        run: |
-          VERSION="${INPUT_VERSION#v}"
-          ITERATION="${INPUT_ITERATION}"
-
-          if [ -z "$VERSION" ]; then
-            echo "::error::Version must be explicitly provided!"
-            exit 1
-          fi
-
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "::error::Version must match semantic versioning format (e.g. 2.15.0)!"
-            exit 1
-          fi
-
-          if ! echo "$ITERATION" | grep -Eq '^[0-9A-Za-z.+~]+$'; then
-            echo "::error::Iteration must be a valid package revision token (e.g. 1)!"
-            exit 1
-          fi
-
-          echo "RELEASE_TAG=v${VERSION}-${ITERATION}" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Kvrocks ${VERSION}-${ITERATION}" >> $GITHUB_ENV
 
       - name: Setup GPG & Sign RPM Packages
         env:
@@ -572,34 +519,28 @@ jobs:
           # 4. Build Debian APT Metadata (Incremental Merge)
           # ==========================================
           ROOT_DIR="$(pwd)"
-          (
-            # Generate Packages.new from staging sandbox so 'pool/main/...' relative paths are preserved
-            cd staging/deb
-            dpkg-scanpackages -m --arch amd64 pool/main > "${ROOT_DIR}/apt-repo/dists/stable/main/binary-amd64/Packages.new"
-            dpkg-scanpackages -m --arch arm64 pool/main > "${ROOT_DIR}/apt-repo/dists/stable/main/binary-arm64/Packages.new"
-          )
-          (
-            cd apt-repo
-            OLD_AMD64="${ROOT_DIR}/existing-pages/dists/stable/main/binary-amd64/Packages"
-            OLD_ARM64="${ROOT_DIR}/existing-pages/dists/stable/main/binary-arm64/Packages"
+          for deb_arch in amd64 arm64; do
+            (
+              cd staging/deb
+              dpkg-scanpackages -m --arch "$deb_arch" pool/main > "${ROOT_DIR}/apt-repo/dists/stable/main/binary-${deb_arch}/Packages.new"
+            )
 
-            [ -f "$OLD_AMD64" ] || OLD_AMD64="none"
-            [ -f "$OLD_ARM64" ] || OLD_ARM64="none"
+            old_pkg="${ROOT_DIR}/existing-pages/dists/stable/main/binary-${deb_arch}/Packages"
+            [ -f "$old_pkg" ] || old_pkg="none"
 
-            echo "=== Merging Debian APT Packages (amd64) ==="
-            python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$OLD_AMD64" dists/stable/main/binary-amd64/Packages.new dists/stable/main/binary-amd64/Packages
-            echo "=== Merging Debian APT Packages (arm64) ==="
-            python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$OLD_ARM64" dists/stable/main/binary-arm64/Packages.new dists/stable/main/binary-arm64/Packages
-            rm -f dists/stable/main/binary-amd64/Packages.new dists/stable/main/binary-arm64/Packages.new
+            echo "=== Merging Debian APT Packages (${deb_arch}) ==="
+            python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$old_pkg" \
+              "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.new" \
+              "apt-repo/dists/stable/main/binary-${deb_arch}/Packages"
+            rm -f "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.new"
 
             # Compress Packages with both gzip and xz
-            gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
-            xz -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.xz
+            gzip -9c "apt-repo/dists/stable/main/binary-${deb_arch}/Packages" > "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.gz"
+            xz -9c "apt-repo/dists/stable/main/binary-${deb_arch}/Packages" > "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.xz"
+          done
 
-            gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
-            xz -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.xz
-
-            cd dists/stable
+          (
+            cd apt-repo/dists/stable
             apt-ftparchive \
               -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
               -o APT::FTPArchive::Release::Label="Kvrocks" \
