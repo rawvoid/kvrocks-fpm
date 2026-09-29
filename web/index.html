@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth" x-data="app()" :class="{ 'dark': darkMode }">
+<html lang="en" class="scroll-smooth bg-slate-50 dark:bg-slate-950" x-data="app()" :class="{ 'dark': darkMode }">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -55,30 +55,47 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    /* Sleek Modern Scrollbars */
+
+    /* Native OS Color Scheme & layout stability */
+    :root {
+      color-scheme: light dark;
+    }
+    html {
+      scrollbar-gutter: stable;
+      background-color: #f8fafc;
+    }
+    html.dark {
+      background-color: #020617;
+    }
+    pre, code {
+      color-scheme: dark;
+    }
+
+    /* Sleek Modern Scrollbars (Global 6px floating rounded pill) */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
     }
     ::-webkit-scrollbar-track {
-      background: transparent;
+      background: transparent !important;
     }
     ::-webkit-scrollbar-thumb {
-      background: rgba(148, 163, 184, 0.25);
+      background: rgba(148, 163, 184, 0.28);
       border-radius: 9999px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: rgba(148, 163, 184, 0.45);
+      background: rgba(148, 163, 184, 0.48);
     }
-    .dark ::-webkit-scrollbar-thumb {
-      background: rgba(148, 163, 184, 0.2);
+    ::-webkit-scrollbar-corner {
+      background: transparent !important;
     }
-    .dark ::-webkit-scrollbar-thumb:hover {
-      background: rgba(148, 163, 184, 0.35);
-    }
-    * {
-      scrollbar-width: thin;
-      scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+
+    /* Standard CSS Scrollbars for Firefox (only when ::-webkit-scrollbar is unsupported) */
+    @supports not selector(::-webkit-scrollbar) {
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+      }
     }
   </style>
 </head>
@@ -724,12 +741,31 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         },
 
         applyTheme(isDark) {
+          const css = document.createElement('style');
+          css.appendChild(
+            document.createTextNode(
+              '*,*::before,*::after{-webkit-transition:none!important;-moz-transition:none!important;-o-transition:none!important;-ms-transition:none!important;transition:none!important}'
+            )
+          );
+          document.head.appendChild(css);
+
           this.darkMode = isDark;
           if (isDark) {
             document.documentElement.classList.add('dark');
           } else {
             document.documentElement.classList.remove('dark');
           }
+
+          // Force reflow so theme switches atomically without compositor lag
+          void document.documentElement.offsetWidth;
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (css.parentNode) {
+                css.parentNode.removeChild(css);
+              }
+            });
+          });
         },
 
         getPkgSuffix() {
