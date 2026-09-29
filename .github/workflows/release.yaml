@@ -173,7 +173,7 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           export CCACHE_DIR="$HOME/.cache/ccache"
-          export CCACHE_MAXSIZE="1G"
+          export CCACHE_MAXSIZE="2G"
           export LDFLAGS="-static-libstdc++ -static-libgcc $LDFLAGS"
           # Inject -g to generate comprehensive DWARF debug symbols alongside -O3 optimizations
           export CFLAGS="-g ${{ matrix.extra_flags }}"
