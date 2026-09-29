@@ -1,0 +1,15 @@
+[kvrocks]
+name=Apache Kvrocks Repository
+baseurl=https://kvrocks.kryo.eu.org/rpm/stable/$basearch/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://kvrocks.kryo.eu.org/kvrocks.asc
+
+[kvrocks-testing]
+name=Apache Kvrocks Testing Repository
+baseurl=https://kvrocks.kryo.eu.org/rpm/testing/$basearch/
+enabled=0
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://kvrocks.kryo.eu.org/kvrocks.asc
