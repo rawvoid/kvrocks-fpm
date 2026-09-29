@@ -99,7 +99,7 @@ main() {
 
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
-        error "This script must be run as root. Please run: curl -fsSL ${REPO_URL}/install.sh | sudo bash"
+        error "This script must be run as root."
     fi
 
     printf '%b' "${CYAN}${BOLD}"
