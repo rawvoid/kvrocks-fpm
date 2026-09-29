@@ -96,6 +96,10 @@ is_rhel_derivative() {
 main() {
     REPO_URL="${KVROCKS_REPO_URL:-https://kvrocks.kryo.eu.org}"
     REPO_URL="${REPO_URL%/}"
+    CHANNEL="${KVROCKS_CHANNEL:-stable}"
+    if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "testing" ]; then
+        error "Unsupported KVROCKS_CHANNEL '${CHANNEL}'. Must be 'stable' or 'testing'."
+    fi
 
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
@@ -219,6 +223,7 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
     info "Hardware Architecture: ${ARCH}"
     info "Detected CPU Feature Level: ${CPU_DETAIL}"
     info "Selected Target Package: ${BOLD}${TARGET_PACKAGE}${NC}"
+    info "Distribution Channel: ${BOLD}${CHANNEL}${NC}"
 
     if [ "$OS_FAMILY" = "debian" ]; then
         # 4. Configure APT Repository
@@ -226,7 +231,7 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
         KEYRING_DIR="/etc/apt/keyrings"
         KEYRING_FILE="${KEYRING_DIR}/kvrocks.gpg"
 
-        info "Configuring APT repository: ${REPO_URL}"
+        info "Configuring APT repository: ${REPO_URL} (${CHANNEL})"
         mkdir -p /etc/apt/sources.list.d
         install -m 0755 -d "$KEYRING_DIR"
 
@@ -235,8 +240,8 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
 
         # Write repository source entry
         cat > "$REPO_LIST" << EOF
-# Apache Kvrocks Repository
-deb [arch=${ARCH} signed-by=${KEYRING_FILE}] ${REPO_URL} stable main
+# Apache Kvrocks Repository (${CHANNEL})
+deb [arch=${ARCH} signed-by=${KEYRING_FILE}] ${REPO_URL} ${CHANNEL} main
 EOF
         chmod 0644 "$REPO_LIST"
 
@@ -275,8 +280,17 @@ EOF
         cat > "$REPO_FILE" << EOF
 [kvrocks]
 name=Apache Kvrocks Repository
-baseurl=${REPO_URL}/rpm/\$basearch/
+baseurl=${REPO_URL}/rpm/stable/\$basearch/
 enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file://${KEY_FILE}
+       ${REPO_URL}/kvrocks.asc
+
+[kvrocks-testing]
+name=Apache Kvrocks Testing Repository
+baseurl=${REPO_URL}/rpm/testing/\$basearch/
+enabled=0
 gpgcheck=1
 repo_gpgcheck=1
 gpgkey=file://${KEY_FILE}
@@ -285,12 +299,18 @@ EOF
         chmod 0644 "$REPO_FILE"
 
         # 5. Install package via DNF / YUM
-        info "Installing ${TARGET_PACKAGE} via ${PKG_MGR}..."
+        RPM_EXTRA_OPTS=()
+        if [ "$CHANNEL" = "testing" ]; then
+            info "Enabling kvrocks-testing repository channel..."
+            RPM_EXTRA_OPTS+=(--enablerepo=kvrocks-testing)
+        fi
+
+        info "Installing ${TARGET_PACKAGE} via ${PKG_MGR} (${CHANNEL})..."
         if [ "$PKG_MGR" = "dnf" ]; then
-            "$PKG_MGR" install -y --refresh --allowerasing "${TARGET_PACKAGE}"
+            "$PKG_MGR" install -y --refresh --allowerasing "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
         else
             "$PKG_MGR" makecache || true
-            "$PKG_MGR" install -y "${TARGET_PACKAGE}"
+            "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
         fi
     fi
 

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth" x-data="app()" :class="{ 'dark': darkMode }">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apache Kvrocks Distro Packages | Official APT & RPM Repositories</title>
+  <meta name="description" content="Official APT (Debian/Ubuntu) and RPM (RHEL/Rocky/Fedora) package distribution repository for Apache Kvrocks with dual-channel support, AVX2 optimization, and global edge acceleration.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪨</text></svg>">
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (theme === 'dark' || (!theme && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              200: '#bbf7d0',
+              300: '#86efac',
+              400: '#4ade80',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              800: '#166534',
+              900: '#14532d',
+              950: '#052e16',
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
+
+  <!-- Top Navigation -->
+  <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <span class="text-2xl">🪨</span>
+        <div class="flex flex-col">
+          <span class="font-bold text-lg leading-tight tracking-tight flex items-center space-x-2">
+            <span>Apache Kvrocks</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-brand-100 text-brand-800 dark:bg-brand-900/50 dark:text-brand-300 font-semibold border border-brand-200 dark:border-brand-800">Packages</span>
+          </span>
+          <span class="text-xs text-slate-500 dark:text-slate-400">APT & RPM Edge Repository</span>
+        </div>
+      </div>
+
+      <nav class="flex items-center space-x-3 sm:space-x-4">
+        <a href="#install" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Installation</a>
+        <a href="#packages" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Package Browser</a>
+        <a href="#security" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Security & GPG</a>
+
+        <div class="h-4 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
+
+        <button @click="cycleTheme()" type="button" :title="'Theme: ' + themeMode + ' (Click to cycle: Auto -> Dark -> Light)'" aria-label="Toggle theme" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 transition">
+          <!-- Auto (System) Monitor Icon -->
+          <svg x-show="themeMode === 'auto'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+          </svg>
+          <!-- Dark Moon Icon -->
+          <svg x-show="themeMode === 'dark'" x-cloak class="w-4 h-4 text-emerald-500 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+          </svg>
+          <!-- Light Sun Icon -->
+          <svg x-show="themeMode === 'light'" x-cloak class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+          </svg>
+        </button>
+
+        <a href="https://github.com/rawvoid/kvrocks-fpm" target="_blank" rel="noopener noreferrer" class="p-2 rounded-lg bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition flex items-center space-x-1.5 text-sm font-medium">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>
+          <span class="hidden sm:inline">GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="flex-grow bg-slate-50 dark:bg-slate-950">
+    <section class="relative overflow-hidden py-12 sm:py-20 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-b from-brand-50/50 via-transparent to-transparent dark:from-emerald-950/20 dark:via-slate-950 dark:to-slate-950">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-brand-100/80 dark:bg-brand-900/40 text-brand-800 dark:text-brand-300 text-xs font-semibold mb-6 border border-brand-200 dark:border-brand-800/60 shadow-sm">
+          <span class="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></span>
+          <span>Zero-Bloat Edge Gateway &amp; Automated Releases</span>
+        </div>
+
+        <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          Production Linux Packages for <span class="bg-gradient-to-r from-brand-600 to-emerald-500 bg-clip-text text-transparent">Apache Kvrocks</span>
+        </h1>
+
+        <p class="mt-4 sm:mt-6 text-base sm:text-lg text-slate-600 dark:text-slate-300 max-w-3xl mx-auto leading-relaxed">
+          High-performance distributed key-value NoSQL database with Redis protocol compatibility and RocksDB storage engine. Fast, automated, signed DEB &amp; RPM distributions.
+        </p>
+
+        <div class="mt-8 flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-slate-600 dark:text-slate-400">
+          <span class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span>⚡</span>
+            <span>AVX2 Microarchitecture (x86-64-v3)</span>
+          </span>
+          <span class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span>🛡️</span>
+            <span>SecureApt &amp; repomd GPG Signed</span>
+          </span>
+          <span class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span>🌐</span>
+            <span>Global Edge Accelerated</span>
+          </span>
+          <span class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+            <span>🔀</span>
+            <span>Dual Channels (Stable / Testing)</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Installation Section -->
+    <section id="install" class="py-12 sm:py-16 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        
+        <!-- Builder Controls -->
+        <div class="p-6 sm:p-8 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+          <h2 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white mb-6 flex items-center space-x-2">
+            <span>🚀</span>
+            <span>Interactive Installation Guide</span>
+          </h2>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- OS Selection -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">1. Operating System</label>
+              <div class="grid grid-cols-3 gap-2">
+                <button @click="os = 'debian'" :class="os === 'debian' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Ubuntu/Deb</button>
+                <button @click="os = 'rhel'" :class="os === 'rhel' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">RHEL/Rocky</button>
+                <button @click="os = 'fedora'" :class="os === 'fedora' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Fedora</button>
+              </div>
+            </div>
+
+            <!-- CPU Architecture -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">2. CPU / Target Variant</label>
+              <div class="grid grid-cols-3 gap-2">
+                <button @click="arch = 'v3'" :class="arch === 'v3' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition" title="Intel Haswell+, AMD Zen+ (AVX2)">x86-64-v3</button>
+                <button @click="arch = 'legacy'" :class="arch === 'legacy' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition" title="Baseline compatibility for older CPUs">Legacy</button>
+                <button @click="arch = 'arm64'" :class="arch === 'arm64' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition" title="ARM 64-bit (AWS Graviton, Aliyun)">ARM64</button>
+              </div>
+            </div>
+
+            <!-- Distribution Channel -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">3. Release Channel</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button @click="channel = 'stable'" :class="channel === 'stable' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Stable (GA)</button>
+                <button @click="channel = 'testing'" :class="channel === 'testing' ? 'bg-amber-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Testing (RC)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Code Snippets Display -->
+        <div class="p-6 sm:p-8">
+          <!-- Method Tabs -->
+          <div class="flex items-center space-x-4 border-b border-slate-200 dark:border-slate-800 pb-4 mb-4">
+            <button @click="installTab = 'quick'" :class="installTab === 'quick' ? 'text-brand-600 dark:text-brand-400 font-bold border-b-2 border-brand-500 pb-2 -mb-4' : 'text-slate-500 dark:text-slate-400 font-medium hover:text-slate-800 dark:hover:text-slate-200'" class="text-sm transition flex items-center space-x-1.5">
+              <span>⚡</span>
+              <span>One-Click Automated Install</span>
+            </button>
+            <button @click="installTab = 'manual'" :class="installTab === 'manual' ? 'text-brand-600 dark:text-brand-400 font-bold border-b-2 border-brand-500 pb-2 -mb-4' : 'text-slate-500 dark:text-slate-400 font-medium hover:text-slate-800 dark:hover:text-slate-200'" class="text-sm transition flex items-center space-x-1.5">
+              <span>🛠️</span>
+              <span>Manual Repository Setup</span>
+            </button>
+          </div>
+
+          <!-- Quick Tab Content -->
+          <div x-show="installTab === 'quick'">
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              The universal installer automatically detects host CPU instruction sets (AVX2/BMI2) and Linux distribution, sets up official GPG keys, and installs the optimal package variant.
+            </p>
+            <div class="relative group">
+              <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getQuickInstallCmd()"></code></pre>
+              <button @click="copy(getQuickInstallCmd())" class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1">
+                <span x-text="copied ? '✓ Copied' : 'Copy'"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Manual Tab Content -->
+          <div x-show="installTab === 'manual'" x-cloak>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              Configure repository keys and sources manually for automated configuration management (Ansible, Puppet, Dockerfile).
+            </p>
+            <div class="relative group">
+              <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getManualInstallCmd()"></code></pre>
+              <button @click="copy(getManualInstallCmd())" class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1">
+                <span x-text="copied ? '✓ Copied' : 'Copy'"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Post-install hints -->
+          <div class="mt-6 pt-6 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-500 dark:text-slate-400 gap-2">
+            <div class="flex items-center space-x-2">
+              <span class="font-semibold text-slate-700 dark:text-slate-300">Default Service:</span>
+              <code class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">systemctl start kvrocks</code>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="font-semibold text-slate-700 dark:text-slate-300">Default Port:</span>
+              <code class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">6666</code>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span class="font-semibold text-slate-700 dark:text-slate-300">Config:</span>
+              <code class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">/etc/kvrocks/kvrocks.conf</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Package Browser Section -->
+    <section id="packages" class="py-12 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center space-x-2">
+            <span>📦</span>
+            <span>Package Archive &amp; Explorer</span>
+          </h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Live binary package catalog dynamically fetched from GitHub Releases</p>
+        </div>
+
+        <!-- Search & Filter Controls -->
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="relative">
+            <input type="text" x-model="searchQuery" placeholder="Filter by version, arch..." class="w-48 sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <svg class="w-4 h-4 text-slate-400 absolute left-2.5 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+
+          <select x-model="pkgType" class="py-1.5 px-3 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <option value="all">All Formats</option>
+            <option value="deb">Debian (.deb)</option>
+            <option value="rpm">RedHat (.rpm)</option>
+            <option value="tar.gz">Debuginfo (.tar.gz)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Loading State -->
+      <div x-show="loading" class="text-center py-16 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+        <div class="inline-block w-8 h-8 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+        <p class="mt-3 text-xs text-slate-500 dark:text-slate-400">Loading release catalog from GitHub Releases...</p>
+      </div>
+
+      <!-- Error / Fallback State -->
+      <div x-show="error" x-cloak class="p-6 text-center bg-white dark:bg-slate-900 rounded-2xl border border-amber-200 dark:border-amber-900/50">
+        <p class="text-sm font-semibold text-amber-600 dark:text-amber-400 mb-2">Notice: Direct GitHub Releases API query limit reached or unavailable.</p>
+        <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">You can browse and download all releases and packages directly on GitHub Releases:</p>
+        <a href="https://github.com/rawvoid/kvrocks-fpm/releases" target="_blank" rel="noopener noreferrer" class="inline-flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-sm transition">
+          <span>View on GitHub Releases &rarr;</span>
+        </a>
+      </div>
+
+      <!-- Package Cards -->
+      <div x-show="!loading && !error" class="space-y-6">
+        <template x-for="rel in filteredReleases" :key="rel.id">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div class="px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center space-x-3">
+                <span class="font-bold text-base text-slate-900 dark:text-white" x-text="rel.name || rel.tag_name"></span>
+                <span :class="rel.prerelease ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-brand-100 text-brand-800 dark:bg-brand-950/60 dark:text-brand-300 border-brand-200 dark:border-brand-800'" class="text-xs px-2.5 py-0.5 rounded-full font-semibold border" x-text="rel.prerelease ? 'Testing (Pre-release)' : 'Stable (Latest)'"></span>
+              </div>
+              <span class="text-xs text-slate-400 dark:text-slate-500" x-text="'Published ' + formatDate(rel.published_at)"></span>
+            </div>
+
+            <!-- Assets Table -->
+            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+              <template x-for="asset in getFilteredAssets(rel.assets)" :key="asset.id">
+                <div class="px-6 py-3 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition text-xs">
+                  <div class="flex items-center space-x-3 min-w-0">
+                    <span class="text-base" x-text="getAssetIcon(asset.name)"></span>
+                    <span class="font-mono font-medium text-slate-800 dark:text-slate-200 truncate" x-text="asset.name"></span>
+                    <span class="text-slate-400 dark:text-slate-500" x-text="'(' + formatBytes(asset.size) + ')'"></span>
+                  </div>
+
+                  <div class="flex items-center space-x-2">
+                    <a :href="asset.browser_download_url" download class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold shadow-sm hover:shadow transition flex items-center space-x-1.5">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                      <span>Download</span>
+                    </a>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- Security & GPG Verification Section -->
+    <section id="security" class="py-12 bg-slate-100/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h2 class="text-xl font-bold tracking-tight text-slate-900 dark:text-white mb-6 flex items-center space-x-2">
+          <span>🛡️</span>
+          <span>Security &amp; GPG Key Verification</span>
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- GPG Credentials -->
+          <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <h3 class="text-sm font-bold text-slate-900 dark:text-white mb-3 flex items-center space-x-2">
+              <span>Public Signing Keys</span>
+            </h3>
+            <p class="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
+              All package metadata (SecureApt Release files and RPM repomd.xml) are cryptographically signed using the repository GPG key.
+            </p>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 text-xs">
+                <div>
+                  <div class="font-bold text-slate-900 dark:text-white">Debian / Ubuntu Keyring</div>
+                  <div class="text-slate-400 font-mono text-[11px]">kvrocks.gpg (binary format)</div>
+                </div>
+                <a href="/kvrocks.gpg" download class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition">Get .gpg</a>
+              </div>
+
+              <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 text-xs">
+                <div>
+                  <div class="font-bold text-slate-900 dark:text-white">RPM / YUM / DNF Key</div>
+                  <div class="text-slate-400 font-mono text-[11px]">kvrocks.asc (ASCII armored)</div>
+                </div>
+                <a href="/kvrocks.asc" download class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition">Get .asc</a>
+              </div>
+            </div>
+          </div>
+
+          <!-- Client Key Verification Commands -->
+          <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <h3 class="text-sm font-bold text-slate-900 dark:text-white mb-3">Client-Side Verification</h3>
+            <p class="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
+              Verify downloaded public key fingerprints on your client machine prior to system installation:
+            </p>
+            <pre class="bg-slate-950 text-slate-200 p-3 rounded-xl text-xs font-mono overflow-x-auto border border-slate-800 leading-relaxed"><code># Verify Debian Keyring
+gpg --show-keys /etc/apt/keyrings/kvrocks.gpg
+
+# Verify Imported RPM Keys
+rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 py-8 text-xs text-slate-500 dark:text-slate-400">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center space-x-2">
+        <span>Apache Kvrocks is an open-source project licensed under Apache-2.0.</span>
+      </div>
+      <div class="flex items-center space-x-4">
+        <a href="https://kvrocks.apache.org" target="_blank" rel="noopener noreferrer" class="hover:text-brand-600 dark:hover:text-brand-400 transition">Apache Kvrocks Official</a>
+        <a href="https://github.com/rawvoid/kvrocks-fpm" target="_blank" rel="noopener noreferrer" class="hover:text-brand-600 dark:hover:text-brand-400 transition">GitHub Repo</a>
+        <a href="https://github.com/rawvoid/kvrocks-fpm/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" class="hover:text-brand-600 dark:hover:text-brand-400 transition">License</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Alpine.js Application Logic -->
+  <script>
+    function app() {
+      const storedTheme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const initialMode = (storedTheme === 'dark' || storedTheme === 'light') ? storedTheme : 'auto';
+      const initialDark = initialMode === 'auto' ? prefersDark : (initialMode === 'dark');
+
+      return {
+        themeMode: initialMode,
+        darkMode: initialDark,
+        os: 'debian',
+        arch: 'v3',
+        channel: 'stable',
+        installTab: 'quick',
+        copied: false,
+        repoOrigin: (window.location.origin && window.location.origin !== 'null') ? window.location.origin : '',
+        releases: [],
+        loading: true,
+        error: false,
+        searchQuery: '',
+        pkgType: 'all',
+
+        init() {
+          this.applyTheme(this.darkMode);
+          this.fetchReleases();
+          this.detectRepoOrigin();
+
+          const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+          mediaQuery.addEventListener('change', (e) => {
+            if (this.themeMode === 'auto') {
+              this.applyTheme(e.matches);
+            }
+          });
+        },
+
+        async detectRepoOrigin() {
+          // When visited via *.github.io, dynamically discover the canonical gateway URL from adjacent kvrocks.repo
+          if (window.location.hostname.endsWith('github.io')) {
+            try {
+              const res = await fetch('kvrocks.repo');
+              if (res.ok) {
+                const text = await res.text();
+                const match = text.match(/baseurl=(https?:\/\/[^\/\s]+)/);
+                if (match && match[1]) {
+                  this.repoOrigin = match[1];
+                }
+              }
+            } catch (e) {
+              // Graceful fallback to window.location.origin
+            }
+          }
+        },
+
+        cycleTheme() {
+          if (this.themeMode === 'auto') {
+            this.themeMode = 'dark';
+            localStorage.setItem('theme', 'dark');
+          } else if (this.themeMode === 'dark') {
+            this.themeMode = 'light';
+            localStorage.setItem('theme', 'light');
+          } else {
+            this.themeMode = 'auto';
+            localStorage.removeItem('theme');
+          }
+          this.computeTheme();
+        },
+
+        computeTheme() {
+          const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          const isDark = this.themeMode === 'auto' ? prefersDark : (this.themeMode === 'dark');
+          this.applyTheme(isDark);
+        },
+
+        applyTheme(isDark) {
+          this.darkMode = isDark;
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        },
+
+        getPkgSuffix() {
+          return this.arch === 'legacy' ? '-legacy' : '';
+        },
+
+        getQuickInstallCmd() {
+          const origin = this.repoOrigin;
+          if (this.channel === 'testing') {
+            return `curl -fsSL ${origin}/install.sh | sudo KVROCKS_CHANNEL=testing bash`;
+          }
+          return `curl -fsSL ${origin}/install.sh | sudo bash`;
+        },
+
+        getManualInstallCmd() {
+          const origin = this.repoOrigin;
+          const pkg = 'kvrocks' + this.getPkgSuffix();
+
+          if (this.os === 'debian') {
+            return `# 1. Install prerequisites & import GPG key\nsudo install -m 0755 -d /etc/apt/keyrings\ncurl -fsSL ${origin}/kvrocks.gpg | sudo tee /etc/apt/keyrings/kvrocks.gpg > /dev/null\n\n# 2. Add repository source\necho "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/kvrocks.gpg] ${origin} ${this.channel} main" | sudo tee /etc/apt/sources.list.d/kvrocks.list\n\n# 3. Update index & install package\nsudo apt-get update\nsudo apt-get install -y ${pkg}`;
+          }
+
+          const extraRepo = this.channel === 'testing' ? '--enablerepo=kvrocks-testing ' : '';
+          return `# 1. Download repository config & import key\nsudo curl -fsSL ${origin}/kvrocks.repo -o /etc/yum.repos.d/kvrocks.repo\nsudo rpm --import ${origin}/kvrocks.asc\n\n# 2. Install package via DNF / YUM\nsudo dnf install -y ${extraRepo}${pkg}`;
+        },
+
+        copy(text) {
+          navigator.clipboard.writeText(text).then(() => {
+            this.copied = true;
+            setTimeout(() => { this.copied = false; }, 2000);
+          });
+        },
+
+        async fetchReleases() {
+          try {
+            const res = await fetch('https://api.github.com/repos/rawvoid/kvrocks-fpm/releases?per_page=10');
+            if (!res.ok) throw new Error('API fetch failed');
+            const data = await res.json();
+            this.releases = data.filter(r => !r.draft);
+            this.loading = false;
+          } catch (err) {
+            this.loading = false;
+            this.error = true;
+          }
+        },
+
+        get filteredReleases() {
+          if (!this.searchQuery) return this.releases;
+          const q = this.searchQuery.toLowerCase();
+          return this.releases.filter(r => {
+            const matchName = (r.name || '').toLowerCase().includes(q) || (r.tag_name || '').toLowerCase().includes(q);
+            const matchAsset = (r.assets || []).some(a => a.name.toLowerCase().includes(q));
+            return matchName || matchAsset;
+          });
+        },
+
+        getFilteredAssets(assets) {
+          if (!assets) return [];
+          let filtered = assets.filter(a => !a.name.endsWith('.txt') && a.name !== 'SHA256SUMS');
+          if (this.pkgType === 'deb') {
+            filtered = filtered.filter(a => a.name.endsWith('.deb'));
+          } else if (this.pkgType === 'rpm') {
+            filtered = filtered.filter(a => a.name.endsWith('.rpm'));
+          } else if (this.pkgType === 'tar.gz') {
+            filtered = filtered.filter(a => a.name.endsWith('.tar.gz'));
+          }
+          if (this.searchQuery) {
+            const q = this.searchQuery.toLowerCase();
+            filtered = filtered.filter(a => a.name.toLowerCase().includes(q));
+          }
+          return filtered;
+        },
+
+        getAssetIcon(name) {
+          if (name.endsWith('.deb')) return '🔴';
+          if (name.endsWith('.rpm')) return '🔵';
+          if (name.endsWith('.tar.gz')) return '📦';
+          return '📄';
+        },
+
+        formatBytes(bytes) {
+          if (!bytes || bytes === 0) return '0 B';
+          const k = 1024;
+          const sizes = ['B', 'KB', 'MB', 'GB'];
+          const i = Math.floor(Math.log(bytes) / Math.log(k));
+          return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        },
+
+        formatDate(dateStr) {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          return d.toISOString().split('T')[0];
+        }
+      }
+    }
+  </script>
+</body>
+</html>
