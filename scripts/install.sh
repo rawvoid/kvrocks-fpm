@@ -280,7 +280,7 @@ EOF
         cat > "$REPO_FILE" << EOF
 [kvrocks]
 name=Apache Kvrocks Repository
-baseurl=${REPO_URL}/rpm/\$basearch/
+baseurl=${REPO_URL}/rpm/stable/\$basearch/
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1

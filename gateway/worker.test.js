@@ -41,31 +41,31 @@ test("resolveReleaseDownloadUrl - Debian packages", () => {
 });
 
 test("resolveReleaseDownloadUrl - RPM packages", () => {
-  // Standard x86_64
+  // Stable channel x86_64
   assert.equal(
-    resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-2.17.0-1.x86_64.rpm"),
+    resolveReleaseDownloadUrl("/rpm/stable/x86_64/kvrocks-2.17.0-1.x86_64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-2.17.0-1.x86_64.rpm"
   );
 
-  // Legacy x86_64
+  // Stable channel Legacy x86_64
   assert.equal(
-    resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-legacy-2.17.0-1.x86_64.rpm"),
+    resolveReleaseDownloadUrl("/rpm/stable/x86_64/kvrocks-legacy-2.17.0-1.x86_64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-legacy-2.17.0-1.x86_64.rpm"
   );
 
-  // Aarch64
+  // Stable channel Aarch64
   assert.equal(
-    resolveReleaseDownloadUrl("/rpm/aarch64/kvrocks-2.17.0-1.aarch64.rpm"),
+    resolveReleaseDownloadUrl("/rpm/stable/aarch64/kvrocks-2.17.0-1.aarch64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-2.17.0-1.aarch64.rpm"
   );
 
   // RPM with distro iteration (e.g. 1.el9)
   assert.equal(
-    resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-2.17.0-1.el9.x86_64.rpm"),
+    resolveReleaseDownloadUrl("/rpm/stable/x86_64/kvrocks-2.17.0-1.el9.x86_64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1.el9/kvrocks-2.17.0-1.el9.x86_64.rpm"
   );
   assert.equal(
-    resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"),
+    resolveReleaseDownloadUrl("/rpm/stable/x86_64/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1.el9/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"
   );
 
@@ -95,7 +95,9 @@ test("resolveReleaseDownloadUrl - Custom repository slug", () => {
 
 test("resolveReleaseDownloadUrl - Non-package files return null", () => {
   assert.equal(resolveReleaseDownloadUrl("/dists/stable/InRelease"), null);
-  assert.equal(resolveReleaseDownloadUrl("/rpm/x86_64/repodata/repomd.xml"), null);
+  assert.equal(resolveReleaseDownloadUrl("/dists/testing/InRelease"), null);
+  assert.equal(resolveReleaseDownloadUrl("/rpm/stable/x86_64/repodata/repomd.xml"), null);
+  assert.equal(resolveReleaseDownloadUrl("/rpm/testing/x86_64/repodata/repomd.xml"), null);
   assert.equal(resolveReleaseDownloadUrl("/install.sh"), null);
   assert.equal(resolveReleaseDownloadUrl("/kvrocks.repo"), null);
   assert.equal(resolveReleaseDownloadUrl("/kvrocks.asc"), null);

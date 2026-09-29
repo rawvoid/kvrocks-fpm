@@ -490,27 +490,21 @@ jobs:
 
           # 2. Prepare directory skeleton for metadata publishing (Strict Zero-Binary Guarantee)
           # Preserve existing channel trees from previous deployment (e.g. keep stable when deploying testing)
-          rm -rf apt-repo
-          mkdir -p apt-repo
+          rm -rf public-repo
+          mkdir -p public-repo
           if [ -d existing-pages/dists ]; then
-            cp -r existing-pages/dists apt-repo/
+            cp -r existing-pages/dists public-repo/
           fi
           if [ -d existing-pages/rpm ]; then
-            cp -r existing-pages/rpm apt-repo/
+            cp -r existing-pages/rpm public-repo/
           fi
 
-          mkdir -p "apt-repo/dists/${CHANNEL}/main/binary-amd64"
-          mkdir -p "apt-repo/dists/${CHANNEL}/main/binary-arm64"
+          mkdir -p "public-repo/dists/${CHANNEL}/main/binary-amd64"
+          mkdir -p "public-repo/dists/${CHANNEL}/main/binary-arm64"
 
-          # Resolve channel-specific RPM output and existing metadata paths
-          RPM_CHANNEL_DIR="apt-repo/rpm"
-          RPM_CHANNEL_REL_PATH="rpm"
-          RPM_EXISTING_PREFIX="existing-pages/rpm"
-          if [ "$CHANNEL" = "testing" ]; then
-            RPM_CHANNEL_DIR="apt-repo/rpm/testing"
-            RPM_CHANNEL_REL_PATH="rpm/testing"
-            RPM_EXISTING_PREFIX="existing-pages/rpm/testing"
-          fi
+          # Symmetrical channel-first RPM repository layout: rpm/${CHANNEL}/${arch}
+          RPM_CHANNEL_DIR="public-repo/rpm/${CHANNEL}"
+          RPM_EXISTING_PREFIX="existing-pages/rpm/${CHANNEL}"
 
           mkdir -p "${RPM_CHANNEL_DIR}/x86_64"
           mkdir -p "${RPM_CHANNEL_DIR}/aarch64"
@@ -518,16 +512,16 @@ jobs:
           GPG_KEY_ID="${GPG_KEY_ID:-$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)}"
 
           # Export public keys
-          gpg --batch --yes --export "$GPG_KEY_ID" > apt-repo/kvrocks.gpg
-          gpg --batch --yes --armor --export "$GPG_KEY_ID" > apt-repo/kvrocks.asc
-          sudo rpm --import apt-repo/kvrocks.asc
+          gpg --batch --yes --export "$GPG_KEY_ID" > public-repo/kvrocks.gpg
+          gpg --batch --yes --armor --export "$GPG_KEY_ID" > public-repo/kvrocks.asc
+          sudo rpm --import public-repo/kvrocks.asc
 
           # Copy installer script and generate client repo config (including testing channel)
-          cp scripts/install.sh apt-repo/install.sh
+          cp scripts/install.sh public-repo/install.sh
 
           GATEWAY_URL="${KVROCKS_GATEWAY_URL:-https://kvrocks.kryo.eu.org}"
-          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n\n[kvrocks-testing]\nname=Apache Kvrocks Testing Repository\nbaseurl=%s/rpm/testing/$basearch/\nenabled=0\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" > apt-repo/kvrocks.repo
-          touch apt-repo/.nojekyll
+          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/stable/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n\n[kvrocks-testing]\nname=Apache Kvrocks Testing Repository\nbaseurl=%s/rpm/testing/$basearch/\nenabled=0\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" > public-repo/kvrocks.repo
+          touch public-repo/.nojekyll
 
           # Prime gpg-agent in-memory cache via stdin pipeline if needed (avoids writing passphrase to disk)
           if [ -n "$GPG_PASSPHRASE" ]; then
@@ -537,7 +531,7 @@ jobs:
           # Prepare GPG base arguments (in-memory gpg-agent daemon handles passphrase caching)
           GPG_BASE_ARGS=(--batch --yes --default-key "$GPG_KEY_ID" --pinentry-mode loopback)
 
-          # 3. Stage newly built packages into temporary isolated sandbox (never copied into apt-repo)
+          # 3. Stage newly built packages into temporary isolated sandbox (never copied into public-repo)
           mkdir -p staging/deb/pool/main
           mkdir -p staging/rpm/x86_64
           mkdir -p staging/rpm/aarch64
@@ -559,7 +553,7 @@ jobs:
           for deb_arch in amd64 arm64; do
             (
               cd staging/deb
-              dpkg-scanpackages -m --arch "$deb_arch" pool/main > "${ROOT_DIR}/apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
+              dpkg-scanpackages -m --arch "$deb_arch" pool/main > "${ROOT_DIR}/public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
             )
 
             old_pkg="${ROOT_DIR}/existing-pages/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
@@ -567,17 +561,17 @@ jobs:
 
             echo "=== Merging Debian APT Packages (${CHANNEL}/${deb_arch}) ==="
             python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$old_pkg" \
-              "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new" \
-              "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
-            rm -f "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
+              "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new" \
+              "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
+            rm -f "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
 
             # Compress Packages with both gzip and xz
-            gzip -9c "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.gz"
-            xz -9c "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.xz"
+            gzip -9c "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.gz"
+            xz -9c "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.xz"
           done
 
           (
-            cd "apt-repo/dists/${CHANNEL}"
+            cd "public-repo/dists/${CHANNEL}"
             apt-ftparchive \
               -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
               -o APT::FTPArchive::Release::Label="Kvrocks" \
@@ -636,23 +630,23 @@ jobs:
           # ==========================================
           # 6. Quality Gate: Zero-Binary Invariant Audit
           # ==========================================
-          # Ensure apt-repo contains strictly metadata (<100KB), completely eliminating quota limits.
+          # Ensure public-repo contains strictly metadata (<100KB), completely eliminating quota limits.
           # Binary packages are permanently hosted on GitHub Releases and streamed via Cloudflare Edge Gateway.
-          LEAKED_PACKAGES=$(find apt-repo -type f \( -name "*.deb" -o -name "*.rpm" \))
+          LEAKED_PACKAGES=$(find public-repo -type f \( -name "*.deb" -o -name "*.rpm" \))
           if [ -n "$LEAKED_PACKAGES" ]; then
             echo "::error title=Binary Leak Detected::Package binaries unexpectedly found in metadata repository:"
             echo "$LEAKED_PACKAGES"
             exit 1
           fi
 
-          TOTAL_PAGES_KB=$(du -sk apt-repo | cut -f1)
+          TOTAL_PAGES_KB=$(du -sk public-repo | cut -f1)
           echo "Total metadata repository footprint: ${TOTAL_PAGES_KB} KB"
 
           echo "### Dual APT & RPM Metadata Repositories Generated (${CHANNEL})" >> $GITHUB_STEP_SUMMARY
           echo "- **Release Channel**: \`${CHANNEL}\` ($( [ "$IS_PRERELEASE" = "true" ] && echo "Pre-release / Testing" || echo "Stable Production" ))" >> $GITHUB_STEP_SUMMARY
           echo "- **Edge Gateway Endpoint**: \`${GATEWAY_URL}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **APT Repository (via Gateway)**: \`${GATEWAY_URL} ${CHANNEL} main\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/${RPM_CHANNEL_REL_PATH}/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/rpm/${CHANNEL}/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **YUM / DNF Repo Config**: \`${GATEWAY_URL}/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GPG Public Key (ASCII)**: \`${GATEWAY_URL}/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, multi-channel retention enabled)" >> $GITHUB_STEP_SUMMARY
@@ -663,5 +657,5 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./apt-repo
+          publish_dir: ./public-repo
           keep_files: false
