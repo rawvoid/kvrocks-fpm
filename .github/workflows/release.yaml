@@ -60,7 +60,7 @@ jobs:
             exit 1
           fi
 
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::Version must match semantic versioning format (e.g. 2.15.0 or 2.15.0-rc1)!"
             exit 1
           fi
@@ -91,7 +91,7 @@ jobs:
             RELEASE_EXISTS=false
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
               RELEASE_EXISTS=true
-            elif git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | grep -q "${RELEASE_TAG}"; then
+            elif git ls-remote --tags --exit-code origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
               RELEASE_EXISTS=true
             fi
 
@@ -402,6 +402,7 @@ jobs:
           mkdir -p ~/.gnupg
           chmod 700 ~/.gnupg
           printf 'allow-loopback-pinentry\ndefault-cache-ttl 3600\nmax-cache-ttl 7200\n' > ~/.gnupg/gpg-agent.conf
+          echo "pinentry-mode loopback" > ~/.gnupg/gpg.conf
           gpg-connect-agent reloadagent /bye 2>/dev/null || true
 
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
@@ -417,10 +418,11 @@ jobs:
           trap 'rm -f /tmp/kvrocks-signing-key.asc' EXIT
 
           # Configure RPM macros for package signing (gpg-agent daemon handles passphrase in-memory)
-          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
-          printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
+          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path %s/.gnupg\n%%_gpg_digest_algo sha256\n%%__gpg /usr/bin/gpg\n' "$GPG_KEY_ID" "$HOME" > ~/.rpmmacros
+          printf '%%__gpg_sign_cmd %%{__gpg} --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
 
           echo "Signing RPM packages in dist/..."
+          ls dist/*.rpm >/dev/null 2>&1 || { echo "::error::No RPM packages found in dist/!"; exit 1; }
           rpmsign --addsign dist/*.rpm
 
           # Export public key to a regular file (avoids sudo closing process substitution /dev/fd/N)
@@ -429,12 +431,11 @@ jobs:
 
           echo "Verifying RPM package signatures..."
           for rpm_pkg in dist/*.rpm; do
-            verify_out=$(rpm -K --define '_pkgverify_level all' "$rpm_pkg")
-            echo "$verify_out"
-            if ! echo "$verify_out" | grep -q 'signatures OK'; then
-              echo "::error::RPM package $rpm_pkg is not properly signed!"
+            if ! verify_out=$(sudo rpm -K --define '_pkgverify_level all' "$rpm_pkg" 2>&1) || ! echo "$verify_out" | grep -q 'signatures OK'; then
+              echo "::error::RPM package $rpm_pkg signature verification failed: $verify_out"
               exit 1
             fi
+            echo "$verify_out"
           done
 
       - name: Generate Checksums & Consolidate Glibc Symbols
@@ -519,7 +520,6 @@ jobs:
           # Export public keys
           gpg --batch --yes --export "$GPG_KEY_ID" > public-repo/kvrocks.gpg
           gpg --batch --yes --armor --export "$GPG_KEY_ID" > public-repo/kvrocks.asc
-          sudo rpm --import public-repo/kvrocks.asc
 
           # Copy installer script, landing page, and generate client repo config
           cp scripts/install.sh public-repo/install.sh
@@ -608,6 +608,7 @@ jobs:
             fi
 
             createrepo_c "staging/rpm/${arch}/"
+            rm -rf "${RPM_CHANNEL_DIR}/${arch}/repodata"
 
             if [ -d "${RPM_EXISTING_PREFIX}/${arch}/repodata" ]; then
               echo "Merging RPM repository metadata for ${CHANNEL}/${arch}..."
