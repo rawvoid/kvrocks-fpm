@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Apache Kvrocks Distro Packages | Official APT & RPM Repositories</title>
-  <meta name="description" content="Official APT (Debian/Ubuntu) and RPM (RHEL/Rocky/Fedora) package distribution repository for Apache Kvrocks with dual-channel support, AVX2 optimization, and global edge acceleration.">
+  <title>Apache Kvrocks Linux Packages | Production APT &amp; RPM Repositories</title>
+  <meta name="description" content="Production APT (Debian/Ubuntu) and RPM (RHEL/Rocky/Fedora) package distribution repositories for Apache Kvrocks with dual-channel support, AVX2 optimization, and global edge acceleration.">
+  <meta property="og:title" content="Apache Kvrocks Linux Packages | Production APT &amp; RPM Repositories">
+  <meta property="og:description" content="Production APT and RPM package repositories for Apache Kvrocks with AVX2 microarchitecture optimization, dual release channels, and global edge acceleration.">
+  <meta property="og:type" content="website">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪨</text></svg>">
   <script>
     (function() {
@@ -52,6 +55,31 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
+    /* Sleek Modern Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.25);
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.45);
+    }
+    .dark ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.2);
+    }
+    .dark ::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.35);
+    }
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
@@ -72,8 +100,8 @@
 
       <nav class="flex items-center space-x-3 sm:space-x-4">
         <a href="#install" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Installation</a>
-        <a href="#packages" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Package Browser</a>
-        <a href="#security" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Security & GPG</a>
+        <a href="#packages" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Package Explorer</a>
+        <a href="#security" class="text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-brand-600 dark:hover:text-brand-400 hidden sm:inline">Security &amp; GPG</a>
 
         <div class="h-4 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
 
@@ -149,33 +177,63 @@
             <span>Interactive Installation Guide</span>
           </h2>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <!-- OS Selection -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <!-- 1. OS Selection -->
             <div>
               <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">1. Operating System</label>
-              <div class="grid grid-cols-3 gap-2">
-                <button @click="os = 'debian'" :class="os === 'debian' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Ubuntu/Deb</button>
-                <button @click="os = 'rhel'" :class="os === 'rhel' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">RHEL/Rocky</button>
-                <button @click="os = 'fedora'" :class="os === 'fedora' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Fedora</button>
+              <div class="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                <button @click="os = 'debian'" 
+                        :class="os === 'debian' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center">
+                  Debian / Ubuntu
+                </button>
+                <button @click="os = 'rhel'" 
+                        :class="os === 'rhel' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center">
+                  RHEL / Rocky
+                </button>
               </div>
             </div>
 
-            <!-- CPU Architecture -->
+            <!-- 2. CPU Architecture -->
             <div>
               <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">2. CPU / Target Variant</label>
-              <div class="grid grid-cols-3 gap-2">
-                <button @click="arch = 'v3'" :class="arch === 'v3' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition" title="Intel Haswell+, AMD Zen+ (AVX2)">x86-64-v3</button>
-                <button @click="arch = 'legacy'" :class="arch === 'legacy' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition" title="Baseline compatibility for older CPUs">Legacy</button>
-                <button @click="arch = 'arm64'" :class="arch === 'arm64' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-2 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition" title="ARM 64-bit (AWS Graviton, Aliyun)">ARM64</button>
+              <div class="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                <button @click="arch = 'v3'" 
+                        :class="arch === 'v3' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center" 
+                        title="Intel Haswell+, AMD Zen+ (AVX2)">
+                  x86-64-v3
+                </button>
+                <button @click="arch = 'legacy'" 
+                        :class="arch === 'legacy' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center" 
+                        title="Baseline compatibility for older CPUs">
+                  Legacy
+                </button>
+                <button @click="arch = 'arm64'" 
+                        :class="arch === 'arm64' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center" 
+                        title="ARM 64-bit (AWS Graviton, Aliyun)">
+                  ARM64
+                </button>
               </div>
             </div>
 
-            <!-- Distribution Channel -->
+            <!-- 3. Distribution Channel -->
             <div>
               <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">3. Release Channel</label>
-              <div class="grid grid-cols-2 gap-2">
-                <button @click="channel = 'stable'" :class="channel === 'stable' ? 'bg-brand-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Stable (GA)</button>
-                <button @click="channel = 'testing'" :class="channel === 'testing' ? 'bg-amber-600 text-white font-semibold shadow-sm' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'" class="px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-center transition">Testing (RC)</button>
+              <div class="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                <button @click="channel = 'stable'" 
+                        :class="channel === 'stable' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center">
+                  Stable (GA)
+                </button>
+                <button @click="channel = 'testing'" 
+                        :class="channel === 'testing' ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
+                        class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center">
+                  Testing (RC)
+                </button>
               </div>
             </div>
           </div>
@@ -213,9 +271,25 @@
             <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
               Configure repository keys and sources manually for automated configuration management (Ansible, Puppet, Dockerfile).
             </p>
+
+            <!-- Error Banner when repoOrigin cannot be fetched -->
+            <div x-show="repoOriginError && !repoOriginLoading" x-cloak class="mb-4 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs flex items-center justify-between gap-3">
+              <div class="flex items-center space-x-2">
+                <span>⚠️</span>
+                <span>Unable to resolve repository base URL from <code>kvrocks.repo</code>.</span>
+              </div>
+              <button @click="detectRepoOrigin()" type="button" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 font-semibold transition shrink-0">
+                Retry
+              </button>
+            </div>
+
             <div class="relative group">
               <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getManualInstallCmd()"></code></pre>
-              <button @click="copy(getManualInstallCmd())" class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1">
+              <button @click="copy(getManualInstallCmd())" 
+                      :disabled="!repoOrigin"
+                      :class="!repoOrigin ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-700'"
+                      class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1"
+                      :title="!repoOrigin ? 'Cannot copy until repository URL is resolved' : 'Copy command'">
                 <span x-text="copied ? '✓ Copied' : 'Copy'"></span>
               </button>
             </div>
@@ -254,11 +328,11 @@
         <!-- Search & Filter Controls -->
         <div class="flex flex-wrap items-center gap-2">
           <div class="relative">
-            <input type="text" x-model="searchQuery" placeholder="Filter by version, arch..." class="w-48 sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <input type="text" x-model="searchQuery" aria-label="Filter packages by version or architecture" placeholder="Filter by version, arch..." class="w-48 sm:w-64 pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500">
             <svg class="w-4 h-4 text-slate-400 absolute left-2.5 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
           </div>
 
-          <select x-model="pkgType" class="py-1.5 px-3 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <select x-model="pkgType" aria-label="Filter packages by format" class="py-1.5 px-3 text-xs rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500">
             <option value="all">All Formats</option>
             <option value="deb">Debian (.deb)</option>
             <option value="rpm">RedHat (.rpm)</option>
@@ -284,37 +358,142 @@
 
       <!-- Package Cards -->
       <div x-show="!loading && !error" class="space-y-6">
+        <!-- Empty Results Message -->
+        <div x-show="filteredReleases.length === 0" class="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
+          <p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No matching packages found</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">No releases match your current search criteria or format filter.</p>
+          <button @click="searchQuery = ''; pkgType = 'all'" type="button" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 transition">
+            Clear Filters
+          </button>
+        </div>
+
         <template x-for="rel in filteredReleases" :key="rel.id">
           <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
-            <div class="px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-              <div class="flex items-center space-x-3">
-                <span class="font-bold text-base text-slate-900 dark:text-white" x-text="rel.name || rel.tag_name"></span>
-                <span :class="rel.prerelease ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-brand-100 text-brand-800 dark:bg-brand-950/60 dark:text-brand-300 border-brand-200 dark:border-brand-800'" class="text-xs px-2.5 py-0.5 rounded-full font-semibold border" x-text="rel.prerelease ? 'Testing (Pre-release)' : 'Stable (Latest)'"></span>
+            <!-- Release Header (Click to toggle expand/collapse) -->
+            <div @click="toggleRelease(rel.id)" 
+                 @keydown.enter.prevent="toggleRelease(rel.id)"
+                 role="button"
+                 tabindex="0"
+                 class="px-5 py-4 sm:px-6 bg-slate-50/60 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-100/60 dark:hover:bg-slate-800/60 transition group focus:outline-none focus:ring-2 focus:ring-brand-500/50">
+              <!-- Left: Chevron + Version Title + Channel Badge -->
+              <div class="flex items-center space-x-2.5 sm:space-x-3">
+                <!-- Chevron Expand Indicator -->
+                <svg class="w-4 h-4 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition-transform duration-200 shrink-0" 
+                     :class="{ 'rotate-180': isExpanded(rel.id) }" 
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+
+                <!-- Release Title / Tag First! -->
+                <span class="font-bold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight" x-text="rel.name || rel.tag_name"></span>
+
+                <!-- Release Channel Badge -->
+                <span :class="rel.prerelease ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' : 'bg-brand-100 text-brand-800 dark:bg-brand-950/60 dark:text-brand-300 border-brand-200 dark:border-brand-800'" class="text-[11px] px-2.5 py-0.5 rounded-full font-semibold border select-none" x-text="rel.prerelease ? 'Testing' : 'Stable'"></span>
               </div>
-              <span class="text-xs text-slate-400 dark:text-slate-500" x-text="'Published ' + formatDate(rel.published_at)"></span>
+
+              <!-- Header Right: Publisher + Date + GitHub Link -->
+              <div class="flex items-center space-x-3 sm:space-x-4 text-xs">
+                <!-- Muted Publisher Info -->
+                <div class="hidden sm:flex items-center space-x-1.5 text-slate-400 dark:text-slate-500 text-[11px]">
+                  <template x-if="rel.author && rel.author.avatar_url">
+                    <img :src="rel.author.avatar_url" alt="" class="w-4 h-4 rounded-full border border-slate-300 dark:border-slate-700 shrink-0" loading="lazy">
+                  </template>
+                  <template x-if="rel.author && rel.author.login">
+                    <a :href="rel.author.html_url" @click.stop target="_blank" rel="noopener noreferrer" class="hover:text-slate-700 dark:hover:text-slate-300 transition" x-text="'@' + rel.author.login"></a>
+                  </template>
+                </div>
+
+                <span class="text-slate-400 dark:text-slate-500 text-[11px] cursor-default hover:text-slate-600 dark:hover:text-slate-300 transition" 
+                      :title="formatFullDate(rel.published_at)" 
+                      x-text="'Published ' + formatDate(rel.published_at)"></span>
+
+                <a :href="rel.html_url" @click.stop target="_blank" rel="noopener noreferrer" title="View Release on GitHub" class="inline-flex items-center space-x-1.5 px-2.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-100/70 hover:bg-slate-200/80 dark:bg-slate-800/60 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 transition">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>
+                  <span>Release</span>
+                  <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                </a>
+              </div>
             </div>
 
-            <!-- Assets Table -->
-            <div class="divide-y divide-slate-100 dark:divide-slate-800">
+            <!-- Assets List (Clean Two-Line / Row Card Layout, Collapsible) -->
+            <div x-show="isExpanded(rel.id)" class="divide-y divide-slate-100 dark:divide-slate-800">
               <template x-for="asset in getFilteredAssets(rel.assets)" :key="asset.id">
-                <div class="px-6 py-3 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition text-xs">
-                  <div class="flex items-center space-x-3 min-w-0">
-                    <span class="text-base" x-text="getAssetIcon(asset.name)"></span>
-                    <span class="font-mono font-medium text-slate-800 dark:text-slate-200 truncate" x-text="asset.name"></span>
-                    <span class="text-slate-400 dark:text-slate-500" x-text="'(' + formatBytes(asset.size) + ')'"></span>
-                  </div>
+                <div class="px-5 py-2.5 sm:px-6 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition text-xs group">
+                  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <!-- Line 1 / Left: Format Pill + Arch Badge + Clickable File Name + Copy Link button -->
+                    <div class="flex items-center space-x-2 min-w-0 flex-1">
+                      <!-- Format Pill -->
+                      <span :class="getAssetBadge(asset.name).color" class="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded border uppercase tracking-wider select-none shrink-0" x-text="getAssetBadge(asset.name).label"></span>
+                      
+                      <!-- Architecture Micro-Badge -->
+                      <template x-if="getAssetArchBadge(asset.name)">
+                        <span class="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200/80 dark:border-slate-700/80 select-none shrink-0" 
+                              :title="getAssetArchBadge(asset.name).desc" 
+                              x-text="getAssetArchBadge(asset.name).label"></span>
+                      </template>
 
-                  <div class="flex items-center space-x-2">
-                    <a :href="asset.browser_download_url" download class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold shadow-sm hover:shadow transition flex items-center space-x-1.5">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                      <span>Download</span>
-                    </a>
+                      <!-- Clickable File Name (direct download) -->
+                      <a :href="asset.browser_download_url" 
+                         :download="asset.name"
+                         :title="'Download ' + asset.name"
+                         class="font-mono text-xs sm:text-[13px] font-semibold text-slate-800 dark:text-slate-200 hover:text-brand-600 dark:hover:text-brand-400 hover:underline truncate transition">
+                        <span x-text="asset.name" class="truncate"></span>
+                      </a>
+
+                      <!-- Copy Link Icon (hover action for curl/wget) -->
+                      <button @click.stop="copyText(asset.browser_download_url, 'url-' + asset.id)" 
+                              type="button" 
+                              class="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 shrink-0" 
+                              :title="copiedId === ('url-' + asset.id) ? 'Direct download URL copied!' : 'Copy download URL (for curl/wget)'">
+                        <span x-show="copiedId === ('url-' + asset.id)" class="text-emerald-500 font-sans text-[10px] font-bold">Copied!</span>
+                        <svg x-show="copiedId !== ('url-' + asset.id)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      </button>
+                    </div>
+
+                    <!-- Line 2 / Right: File Size & SHA256 -->
+                    <div class="flex items-center space-x-3 text-xs text-slate-500 dark:text-slate-400 pl-6 sm:pl-0 shrink-0">
+                      <!-- Strictly Aligned File Size -->
+                      <span class="text-xs font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap w-20 text-right shrink-0" x-text="formatBytes(asset.size)"></span>
+
+                      <!-- SHA256 compact block with one-click copy -->
+                      <template x-if="getSha256(asset)">
+                        <div class="flex items-center space-x-1 font-mono text-[11px] bg-slate-100/90 dark:bg-slate-800/90 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700/80" :title="'Full SHA256: ' + getSha256(asset)">
+                          <span class="text-slate-400 dark:text-slate-500 select-none font-medium text-[10px]">SHA256:</span>
+                          <span class="text-slate-600 dark:text-slate-300" x-text="getShortSha256(asset)"></span>
+                          <button @click="copyText(getSha256(asset), 'sha-' + asset.id)" 
+                                  type="button"
+                                  class="ml-1 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition" 
+                                  :title="copiedId === ('sha-' + asset.id) ? 'Copied SHA256!' : 'Copy full SHA256'">
+                            <span x-show="copiedId === ('sha-' + asset.id)" class="text-emerald-500 font-sans text-[10px] font-bold">✓</span>
+                            <svg x-show="copiedId !== ('sha-' + asset.id)" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                          </button>
+                        </div>
+                      </template>
+                    </div>
                   </div>
                 </div>
               </template>
             </div>
           </div>
         </template>
+
+        <!-- Pagination / Load More Controls -->
+        <div class="pt-2 text-center" x-show="hasMore">
+          <button @click="loadMoreReleases()" 
+                  :disabled="loadingMore"
+                  type="button"
+                  class="inline-flex items-center space-x-2 px-6 py-2.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow transition disabled:opacity-60">
+            <svg x-show="loadingMore" class="w-4 h-4 animate-spin text-brand-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+            <span x-text="loadingMore ? 'Loading older releases...' : 'Load Older Releases ▾'"></span>
+          </button>
+        </div>
+
+        <div class="pt-4 text-center" x-show="!hasMore && releases.length > 0">
+          <p class="text-xs text-slate-400 dark:text-slate-500">
+            All releases loaded. Browse older tags directly on 
+            <a href="https://github.com/rawvoid/kvrocks-fpm/releases" target="_blank" rel="noopener noreferrer" class="text-brand-600 dark:text-brand-400 hover:underline">GitHub Releases</a>.
+          </p>
+        </div>
       </div>
     </section>
 
@@ -341,7 +520,7 @@
                   <div class="font-bold text-slate-900 dark:text-white">Debian / Ubuntu Keyring</div>
                   <div class="text-slate-400 font-mono text-[11px]">kvrocks.gpg (binary format)</div>
                 </div>
-                <a href="/kvrocks.gpg" download class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition">Get .gpg</a>
+                <a href="kvrocks.gpg" download class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition">Get .gpg</a>
               </div>
 
               <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 text-xs">
@@ -349,7 +528,7 @@
                   <div class="font-bold text-slate-900 dark:text-white">RPM / YUM / DNF Key</div>
                   <div class="text-slate-400 font-mono text-[11px]">kvrocks.asc (ASCII armored)</div>
                 </div>
-                <a href="/kvrocks.asc" download class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition">Get .asc</a>
+                <a href="kvrocks.asc" download class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium hover:bg-slate-300 dark:hover:bg-slate-600 transition">Get .asc</a>
               </div>
             </div>
           </div>
@@ -360,11 +539,19 @@
             <p class="text-xs text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">
               Verify downloaded public key fingerprints on your client machine prior to system installation:
             </p>
-            <pre class="bg-slate-950 text-slate-200 p-3 rounded-xl text-xs font-mono overflow-x-auto border border-slate-800 leading-relaxed"><code># Verify Debian Keyring
+            <div class="relative group">
+              <pre class="bg-slate-950 text-slate-200 p-3 rounded-xl text-xs font-mono overflow-x-auto border border-slate-800 leading-relaxed"><code># Verify Debian Keyring
 gpg --show-keys /etc/apt/keyrings/kvrocks.gpg
 
 # Verify Imported RPM Keys
 rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
+              <button @click="copyText('# Verify Debian Keyring\ngpg --show-keys /etc/apt/keyrings/kvrocks.gpg\n\n# Verify Imported RPM Keys\nrpm -qi gpg-pubkey | grep -E \'Summary|Version\'', 'verify-cmds')" 
+                      type="button"
+                      class="absolute top-2.5 right-2.5 px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700/80 transition flex items-center space-x-1"
+                      :title="copiedId === 'verify-cmds' ? 'Commands copied!' : 'Copy verification commands'">
+                <span x-text="copiedId === 'verify-cmds' ? '✓ Copied' : 'Copy'"></span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -401,12 +588,20 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         channel: 'stable',
         installTab: 'quick',
         copied: false,
-        repoOrigin: (window.location.origin && window.location.origin !== 'null') ? window.location.origin : '',
+        copiedId: null,
+        repoOrigin: '',
+        repoOriginLoading: true,
+        repoOriginError: false,
         releases: [],
+        expandedReleases: [],
         loading: true,
         error: false,
         searchQuery: '',
         pkgType: 'all',
+        page: 1,
+        perPage: 5,
+        hasMore: true,
+        loadingMore: false,
 
         init() {
           this.applyTheme(this.darkMode);
@@ -422,20 +617,24 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         },
 
         async detectRepoOrigin() {
-          // When visited via *.github.io, dynamically discover the canonical gateway URL from adjacent kvrocks.repo
-          if (window.location.hostname.endsWith('github.io')) {
-            try {
-              const res = await fetch('kvrocks.repo');
-              if (res.ok) {
-                const text = await res.text();
-                const match = text.match(/baseurl=(https?:\/\/[^\/\s]+)/);
-                if (match && match[1]) {
-                  this.repoOrigin = match[1];
-                }
-              }
-            } catch (e) {
-              // Graceful fallback to window.location.origin
+          this.repoOriginLoading = true;
+          this.repoOriginError = false;
+          try {
+            const res = await fetch('kvrocks.repo');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const text = await res.text();
+            const match = text.match(/baseurl=(https?:\/\/[^\/\s]+)/);
+            if (match && match[1]) {
+              this.repoOrigin = match[1];
+              this.repoOriginError = false;
+            } else {
+              throw new Error('baseurl not found in kvrocks.repo');
             }
+          } catch (e) {
+            this.repoOrigin = '';
+            this.repoOriginError = true;
+          } finally {
+            this.repoOriginLoading = false;
           }
         },
 
@@ -473,14 +672,21 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         },
 
         getQuickInstallCmd() {
-          const origin = this.repoOrigin;
+          const scriptUrl = 'https://rawvoid.github.io/kvrocks-fpm/install.sh';
           if (this.channel === 'testing') {
-            return `curl -fsSL ${origin}/install.sh | sudo KVROCKS_CHANNEL=testing bash`;
+            return `curl -fsSL ${scriptUrl} | sudo KVROCKS_CHANNEL=testing bash`;
           }
-          return `curl -fsSL ${origin}/install.sh | sudo bash`;
+          return `curl -fsSL ${scriptUrl} | sudo bash`;
         },
 
         getManualInstallCmd() {
+          if (this.repoOriginLoading) {
+            return '# Loading repository configuration from kvrocks.repo...';
+          }
+          if (!this.repoOrigin || this.repoOriginError) {
+            return '# Error: Failed to resolve repository base URL from kvrocks.repo.\n# Please ensure kvrocks.repo is available or check your network connection.';
+          }
+
           const origin = this.repoOrigin;
           const pkg = 'kvrocks' + this.getPkgSuffix();
 
@@ -499,12 +705,44 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
           });
         },
 
+        copyText(text, id) {
+          if (!navigator.clipboard) return;
+          navigator.clipboard.writeText(text).then(() => {
+            this.copiedId = id;
+            setTimeout(() => {
+              if (this.copiedId === id) {
+                this.copiedId = null;
+              }
+            }, 2000);
+          });
+        },
+
+        getSha256(asset) {
+          if (!asset || !asset.digest) return '';
+          return asset.digest.replace(/^sha256:/i, '').trim();
+        },
+
+        getShortSha256(asset) {
+          const full = this.getSha256(asset);
+          if (!full) return '';
+          return full.substring(0, 7) + '...' + full.substring(full.length - 4);
+        },
+
         async fetchReleases() {
           try {
-            const res = await fetch('https://api.github.com/repos/rawvoid/kvrocks-fpm/releases?per_page=10');
+            this.page = 1;
+            const res = await fetch(`https://api.github.com/repos/rawvoid/kvrocks-fpm/releases?per_page=${this.perPage}&page=${this.page}`);
             if (!res.ok) throw new Error('API fetch failed');
             const data = await res.json();
-            this.releases = data.filter(r => !r.draft);
+            if (!Array.isArray(data)) throw new Error('Invalid response payload');
+            const valid = data.filter(r => !r.draft);
+            this.releases = valid;
+            if (valid.length > 0) {
+              this.expandedReleases = [valid[0].id];
+            }
+            if (data.length < this.perPage) {
+              this.hasMore = false;
+            }
             this.loading = false;
           } catch (err) {
             this.loading = false;
@@ -512,14 +750,90 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
           }
         },
 
+        async loadMoreReleases() {
+          if (this.loadingMore || !this.hasMore) return;
+          this.loadingMore = true;
+          try {
+            this.page++;
+            const res = await fetch(`https://api.github.com/repos/rawvoid/kvrocks-fpm/releases?per_page=${this.perPage}&page=${this.page}`);
+            if (!res.ok) throw new Error('API fetch failed');
+            const data = await res.json();
+            if (!Array.isArray(data)) throw new Error('Invalid response payload');
+            const valid = data.filter(r => !r.draft);
+            if (valid.length > 0) {
+              const existingIds = new Set(this.releases.map(r => r.id));
+              for (const r of valid) {
+                if (!existingIds.has(r.id)) {
+                  this.releases.push(r);
+                }
+              }
+            }
+            if (data.length < this.perPage) {
+              this.hasMore = false;
+            }
+          } catch (err) {
+            this.hasMore = false;
+          } finally {
+            this.loadingMore = false;
+          }
+        },
+
+        isExpanded(id) {
+          if (this.searchQuery) return true;
+          return this.expandedReleases.includes(id);
+        },
+
+        toggleRelease(id) {
+          if (this.expandedReleases.includes(id)) {
+            this.expandedReleases = this.expandedReleases.filter(i => i !== id);
+          } else {
+            this.expandedReleases.push(id);
+          }
+        },
+
         get filteredReleases() {
-          if (!this.searchQuery) return this.releases;
+          let rels = this.releases;
+          if (this.pkgType !== 'all') {
+            rels = rels.filter(r => this.getFilteredAssets(r.assets).length > 0);
+          }
+          if (!this.searchQuery) return rels;
           const q = this.searchQuery.toLowerCase();
-          return this.releases.filter(r => {
+          return rels.filter(r => {
             const matchName = (r.name || '').toLowerCase().includes(q) || (r.tag_name || '').toLowerCase().includes(q);
-            const matchAsset = (r.assets || []).some(a => a.name.toLowerCase().includes(q));
+            const matchAsset = this.getFilteredAssets(r.assets).length > 0;
             return matchName || matchAsset;
           });
+        },
+
+        getAssetPriority(name) {
+          let base = 40;
+          if (name.endsWith('.deb')) base = 10;
+          else if (name.endsWith('.rpm')) base = 20;
+          else if (name.endsWith('.tar.gz')) base = 30;
+
+          let sub = 1;
+          if (name.includes('legacy')) {
+            sub = 3;
+          } else if (name.includes('arm64') || name.includes('aarch64')) {
+            sub = 2;
+          } else {
+            sub = 1;
+          }
+
+          return base + sub;
+        },
+
+        getAssetArchBadge(name) {
+          if (name.includes('legacy')) {
+            return { label: 'Legacy', desc: 'Baseline x86-64 Compatibility' };
+          }
+          if (name.includes('arm64') || name.includes('aarch64')) {
+            return { label: 'ARM64', desc: 'ARM 64-bit Architecture' };
+          }
+          if (name.includes('amd64') || name.includes('x86_64')) {
+            return { label: 'x86-64-v3', desc: 'AVX2 / BMI2 Microarchitecture Optimized' };
+          }
+          return null;
         },
 
         getFilteredAssets(assets) {
@@ -536,14 +850,23 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
             const q = this.searchQuery.toLowerCase();
             filtered = filtered.filter(a => a.name.toLowerCase().includes(q));
           }
-          return filtered;
+          return filtered.sort((a, b) => {
+            const prioDiff = this.getAssetPriority(a.name) - this.getAssetPriority(b.name);
+            return prioDiff !== 0 ? prioDiff : a.name.localeCompare(b.name);
+          });
         },
 
-        getAssetIcon(name) {
-          if (name.endsWith('.deb')) return '🔴';
-          if (name.endsWith('.rpm')) return '🔵';
-          if (name.endsWith('.tar.gz')) return '📦';
-          return '📄';
+        getAssetBadge(name) {
+          if (name.endsWith('.deb')) {
+            return { label: 'DEB', color: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-900/50' };
+          }
+          if (name.endsWith('.rpm')) {
+            return { label: 'RPM', color: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-400 dark:border-sky-900/50' };
+          }
+          if (name.endsWith('.tar.gz')) {
+            return { label: 'TGZ', color: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50' };
+          }
+          return { label: 'BIN', color: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700' };
         },
 
         formatBytes(bytes) {
@@ -556,8 +879,22 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
 
         formatDate(dateStr) {
           if (!dateStr) return '';
-          const d = new Date(dateStr);
-          return d.toISOString().split('T')[0];
+          try {
+            const d = new Date(dateStr);
+            return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0];
+          } catch (e) {
+            return '';
+          }
+        },
+
+        formatFullDate(dateStr) {
+          if (!dateStr) return '';
+          try {
+            const d = new Date(dateStr);
+            return isNaN(d.getTime()) ? '' : d.toLocaleString();
+          } catch (e) {
+            return '';
+          }
         }
       }
     }
