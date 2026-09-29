@@ -105,17 +105,51 @@ test("resolveReleaseDownloadUrl - Non-package files return null", () => {
   assert.equal(resolveReleaseDownloadUrl("/invalid_format.rpm"), null);
 });
 
-test("worker.fetch - Health check endpoint", async () => {
-  const req = new Request("https://kvrocks-repo.example.com/healthz");
-  const res = await worker.fetch(req, {});
+test("worker.fetch - Root landing page proxies /index.html", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    let proxiedUrl = null;
+    globalThis.fetch = async (req) => {
+      proxiedUrl = typeof req === "string" ? req : req.url;
+      return new Response("<!DOCTYPE html><html><body>Kvrocks</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    };
 
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("content-type"), "application/json; charset=utf-8");
+    const req = new Request("https://kvrocks-repo.example.com/");
+    const res = await worker.fetch(req, { METADATA_ORIGIN: "https://rawvoid.github.io/kvrocks-fpm" });
 
-  const data = await res.json();
-  assert.equal(data.status, "ok");
-  assert.equal(data.service, "kvrocks-package-repository-gateway");
-  assert.equal(data.repository, DEFAULT_GITHUB_REPO);
+    assert.equal(res.status, 200);
+    assert.equal(proxiedUrl, "https://rawvoid.github.io/kvrocks-fpm/index.html");
+    assert.equal(res.headers.get("access-control-allow-origin"), "*");
+    assert.equal(res.headers.get("cache-control"), "public, max-age=600, s-maxage=600");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("worker.fetch - Static script /install.sh proxying", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    let proxiedUrl = null;
+    globalThis.fetch = async (req) => {
+      proxiedUrl = typeof req === "string" ? req : req.url;
+      return new Response("#!/bin/sh\necho install", {
+        status: 200,
+        headers: { "Content-Type": "text/x-shellscript; charset=utf-8" },
+      });
+    };
+
+    const req = new Request("https://kvrocks-repo.example.com/install.sh");
+    const res = await worker.fetch(req, { METADATA_ORIGIN: "https://rawvoid.github.io/kvrocks-fpm" });
+
+    assert.equal(res.status, 200);
+    assert.equal(proxiedUrl, "https://rawvoid.github.io/kvrocks-fpm/install.sh");
+    assert.equal(res.headers.get("cache-control"), "public, max-age=600, s-maxage=600");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("worker.fetch - Redirect mode (?redirect=1)", async () => {
@@ -134,11 +168,4 @@ test("worker.fetch - Invalid package naming returns 404", async () => {
   const res = await worker.fetch(req, {});
 
   assert.equal(res.status, 404);
-});
-
-test("worker.fetch - HEAD request support on health check", async () => {
-  const req = new Request("https://kvrocks-repo.example.com/healthz", { method: "HEAD" });
-  const res = await worker.fetch(req, {});
-
-  assert.equal(res.status, 200);
 });

@@ -69,34 +69,7 @@ export default {
     const githubRepo = env?.GITHUB_REPO || DEFAULT_GITHUB_REPO;
     const metadataOrigin = env?.METADATA_ORIGIN || DEFAULT_METADATA_ORIGIN;
 
-    // 1. Health check & Root Landing
-    if (pathname === "/" || pathname === "/healthz") {
-      return new Response(
-        JSON.stringify(
-          {
-            status: "ok",
-            service: "kvrocks-package-repository-gateway",
-            repository: githubRepo,
-            upstream_metadata: metadataOrigin,
-            modes: {
-              packages: "stream-proxy-with-edge-cache (fallback: ?redirect=1)",
-              metadata: "proxy-with-edge-cache",
-            },
-            documentation: `https://github.com/${githubRepo}`,
-          },
-          null,
-          2
-        ),
-        {
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Access-Control-Allow-Origin": "*",
-          },
-        }
-      );
-    }
-
-    // 2. Binary Package Requests (*.deb, *.rpm) -> Stream Proxy + Edge Cache
+    // 1. Binary Package Requests (*.deb, *.rpm) -> Stream Proxy + Edge Cache
     if (pathname.endsWith(".deb") || pathname.endsWith(".rpm")) {
       const targetUrl = resolveReleaseDownloadUrl(pathname, githubRepo);
       if (!targetUrl) {
@@ -168,9 +141,10 @@ export default {
       return responseToReturn;
     }
 
-    // 3. Metadata & Static Assets -> Proxy from GitHub Pages
+    // 2. Metadata, Static Assets, and Root Landing Page -> Proxy from GitHub Pages
     const originUrl = new URL(metadataOrigin);
-    const upstreamPath = originUrl.pathname.replace(/\/$/, "") + pathname;
+    const targetPath = (pathname === "/" || pathname === "") ? "/index.html" : pathname;
+    const upstreamPath = originUrl.pathname.replace(/\/$/, "") + targetPath;
     const upstreamMetaUrl = new URL(upstreamPath, originUrl.origin);
     upstreamMetaUrl.search = url.search;
 
@@ -185,12 +159,12 @@ export default {
     metaHeaders.set("Access-Control-Allow-Origin", "*");
 
     // Tiered edge cache headers based on asset sensitivity
-    if (pathname.includes("InRelease") || pathname.includes("Release") || pathname.includes("repomd.xml")) {
+    if (targetPath.includes("InRelease") || targetPath.includes("Release") || targetPath.includes("repomd.xml")) {
       metaHeaders.set("Cache-Control", "public, max-age=300, s-maxage=300"); // 5 min for repo indexes
-    } else if (pathname.endsWith(".asc") || pathname.endsWith(".gpg")) {
+    } else if (targetPath.endsWith(".asc") || targetPath.endsWith(".gpg")) {
       metaHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=86400"); // 24 hours for signing keys
-    } else if (pathname.endsWith(".sh") || pathname.endsWith(".repo")) {
-      metaHeaders.set("Cache-Control", "public, max-age=600, s-maxage=600"); // 10 min for config/installer
+    } else if (targetPath.endsWith(".html") || targetPath.endsWith(".sh") || targetPath.endsWith(".repo")) {
+      metaHeaders.set("Cache-Control", "public, max-age=600, s-maxage=600"); // 10 min for html/config/installer
     }
 
     return new Response(metaResponse.body, {

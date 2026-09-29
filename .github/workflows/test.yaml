@@ -5,6 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_call:
 
 jobs:
   lint-and-test:
@@ -30,6 +31,21 @@ jobs:
       - name: Run Gateway Unit Tests
         run: |
           npm --prefix gateway test
+
+      - name: Validate Web Landing Page
+        run: |
+          node -e "
+            const fs = require('fs');
+            const html = fs.readFileSync('web/index.html', 'utf8');
+            const scripts = html.match(/<script[\s\S]*?<\/script>/gi) || [];
+            for (const s of scripts) {
+              if (!s.includes('src=')) {
+                const code = s.replace(/<script[\s\S]*?>/i, '').replace(/<\/script>/i, '');
+                new Function(code);
+              }
+            }
+            console.log('web/index.html inline scripts validated successfully.');
+          "
 
       - name: Run Shellcheck
         run: |

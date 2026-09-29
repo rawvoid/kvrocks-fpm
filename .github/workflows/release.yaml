@@ -105,9 +105,14 @@ jobs:
 
           echo "Preflight validation passed: Target Release ${RELEASE_TAG}"
 
+  test:
+    name: Pre-Release Quality Gate
+    needs: preflight
+    uses: ./.github/workflows/test.yaml
+
   build-and-package:
     name: Build & Package (${{ matrix.arch }}, ${{ matrix.cpu_target }})
-    needs: preflight
+    needs: [preflight, test]
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
@@ -516,8 +521,9 @@ jobs:
           gpg --batch --yes --armor --export "$GPG_KEY_ID" > public-repo/kvrocks.asc
           sudo rpm --import public-repo/kvrocks.asc
 
-          # Copy installer script and generate client repo config (including testing channel)
+          # Copy installer script, landing page, and generate client repo config
           cp scripts/install.sh public-repo/install.sh
+          cp web/index.html public-repo/index.html
 
           GATEWAY_URL="${KVROCKS_GATEWAY_URL:-https://kvrocks.kryo.eu.org}"
           printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/stable/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n\n[kvrocks-testing]\nname=Apache Kvrocks Testing Repository\nbaseurl=%s/rpm/testing/$basearch/\nenabled=0\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" > public-repo/kvrocks.repo
