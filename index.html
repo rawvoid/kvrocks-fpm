@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth" x-data="app()" :class="{ 'dark': darkMode }">
+<html lang="en" class="scroll-smooth bg-slate-50 dark:bg-slate-950" x-data="app()" :class="{ 'dark': darkMode }">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +8,7 @@
   <meta property="og:title" content="Apache Kvrocks Linux Packages | Production APT &amp; RPM Repositories">
   <meta property="og:description" content="Production APT and RPM package repositories for Apache Kvrocks with AVX2 microarchitecture optimization, dual release channels, and global edge acceleration.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪨</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2036%2036%22%20fill%3D%22none%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22kvTop%22%20x1%3D%220%25%22%20y1%3D%22100%25%22%20x2%3D%22100%25%22%20y2%3D%220%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2322c55e%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%234ade80%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvLeft%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2316a34a%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2315803d%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvRight%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2315803d%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2314532d%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvMTop%22%20x1%3D%220%25%22%20y1%3D%22100%25%22%20x2%3D%22100%25%22%20y2%3D%220%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2316a34a%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2322c55e%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvMLeft%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2315803d%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23166534%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvMRight%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2314532d%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23052e16%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvBLeft%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23166534%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2314532d%22/%3E%3C/linearGradient%3E%3ClinearGradient%20id%3D%22kvBRight%22%20x1%3D%220%25%22%20y1%3D%220%25%22%20x2%3D%22100%25%22%20y2%3D%22100%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2314532d%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23022c22%22/%3E%3C/linearGradient%3E%3CradialGradient%20id%3D%22kvGlow%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%234ade80%22%20stop-opacity%3D%220.4%22/%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2322c55e%22%20stop-opacity%3D%220%22/%3E%3C/radialGradient%3E%3C/defs%3E%3Cellipse%20cx%3D%2218%22%20cy%3D%2219%22%20rx%3D%2216%22%20ry%3D%2213%22%20fill%3D%22url%28%23kvGlow%29%22/%3E%3Cg%20transform%3D%22translate%280%2C%2014%29%22%3E%3Cpath%20d%3D%22M6%207%20L18%2014%20L30%207%20L18%200%20Z%22%20fill%3D%22%2315803d%22%20opacity%3D%220.8%22/%3E%3Cpath%20d%3D%22M6%207%20L18%2014%20L18%2018%20L6%2011%20Z%22%20fill%3D%22url%28%23kvBLeft%29%22/%3E%3Cpath%20d%3D%22M18%2014%20L30%207%20L30%2011%20L18%2018%20Z%22%20fill%3D%22url%28%23kvBRight%29%22/%3E%3Cpath%20d%3D%22M6%2011%20L18%2018%20L30%2011%22%20stroke%3D%22%234ade80%22%20stroke-width%3D%220.5%22%20stroke-opacity%3D%220.25%22/%3E%3C/g%3E%3Cg%20transform%3D%22translate%280%2C%207%29%22%3E%3Cpath%20d%3D%22M6%207%20L18%2014%20L30%207%20L18%200%20Z%22%20fill%3D%22url%28%23kvMTop%29%22/%3E%3Cpath%20d%3D%22M6%207%20L18%2014%20L18%2018%20L6%2011%20Z%22%20fill%3D%22url%28%23kvMLeft%29%22/%3E%3Cpath%20d%3D%22M18%2014%20L30%207%20L30%2011%20L18%2018%20Z%22%20fill%3D%22url%28%23kvMRight%29%22/%3E%3Cpath%20d%3D%22M18%200%20L6%207%20L18%2014%20L30%207%20Z%22%20stroke%3D%22%2386efac%22%20stroke-width%3D%220.5%22%20stroke-opacity%3D%220.3%22/%3E%3Cpath%20d%3D%22M6%2011%20L18%2018%20L30%2011%22%20stroke%3D%22%234ade80%22%20stroke-width%3D%220.5%22%20stroke-opacity%3D%220.35%22/%3E%3C/g%3E%3Cg%3E%3Cpath%20d%3D%22M6%208%20L18%2015%20L18%2019%20L6%2012%20Z%22%20fill%3D%22url%28%23kvLeft%29%22/%3E%3Cpath%20d%3D%22M18%2015%20L30%208%20L30%2012%20L18%2019%20Z%22%20fill%3D%22url%28%23kvRight%29%22/%3E%3Cpath%20d%3D%22M18%201%20L30%208%20L18%2015%20L6%208%20Z%22%20fill%3D%22url%28%23kvTop%29%22/%3E%3Cpath%20d%3D%22M18%201%20L6%208%20L18%2015%20L30%208%20Z%22%20stroke%3D%22%23bbf7d0%22%20stroke-width%3D%220.6%22%20stroke-opacity%3D%220.8%22/%3E%3Cpath%20d%3D%22M18%2015%20L18%2019%22%20stroke%3D%22%2386efac%22%20stroke-width%3D%220.6%22%20stroke-opacity%3D%220.7%22/%3E%3Cpath%20d%3D%22M6%2012%20L18%2019%20L30%2012%22%20stroke%3D%22%234ade80%22%20stroke-width%3D%220.5%22%20stroke-opacity%3D%220.45%22/%3E%3Cpath%20d%3D%22M18%204.5%20L24%208%20L18%2011.5%20L12%208%20Z%22%20fill%3D%22%23ffffff%22%20fill-opacity%3D%220.2%22/%3E%3C/g%3E%3C/svg%3E">
   <script>
     (function() {
       const theme = localStorage.getItem('theme');
@@ -55,30 +55,47 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    /* Sleek Modern Scrollbars */
+
+    /* Native OS Color Scheme & layout stability */
+    :root {
+      color-scheme: light dark;
+    }
+    html {
+      scrollbar-gutter: stable;
+      background-color: #f8fafc;
+    }
+    html.dark {
+      background-color: #020617;
+    }
+    pre, code {
+      color-scheme: dark;
+    }
+
+    /* Sleek Modern Scrollbars (Global 6px floating rounded pill) */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
     }
     ::-webkit-scrollbar-track {
-      background: transparent;
+      background: transparent !important;
     }
     ::-webkit-scrollbar-thumb {
-      background: rgba(148, 163, 184, 0.25);
+      background: rgba(148, 163, 184, 0.28);
       border-radius: 9999px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: rgba(148, 163, 184, 0.45);
+      background: rgba(148, 163, 184, 0.48);
     }
-    .dark ::-webkit-scrollbar-thumb {
-      background: rgba(148, 163, 184, 0.2);
+    ::-webkit-scrollbar-corner {
+      background: transparent !important;
     }
-    .dark ::-webkit-scrollbar-thumb:hover {
-      background: rgba(148, 163, 184, 0.35);
-    }
-    * {
-      scrollbar-width: thin;
-      scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+
+    /* Standard CSS Scrollbars for Firefox (only when ::-webkit-scrollbar is unsupported) */
+    @supports not selector(::-webkit-scrollbar) {
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 184, 0.28) transparent;
+      }
     }
   </style>
 </head>
@@ -88,7 +105,72 @@
   <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <span class="text-2xl">🪨</span>
+        <svg class="w-8 h-8 shrink-0 select-none drop-shadow-sm" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Apache Kvrocks Logo">
+          <defs>
+            <linearGradient id="navKvTop" x1="0%" y1="100%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#22c55e"/>
+              <stop offset="100%" stop-color="#4ade80"/>
+            </linearGradient>
+            <linearGradient id="navKvLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#16a34a"/>
+              <stop offset="100%" stop-color="#15803d"/>
+            </linearGradient>
+            <linearGradient id="navKvRight" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#15803d"/>
+              <stop offset="100%" stop-color="#14532d"/>
+            </linearGradient>
+            <linearGradient id="navKvMTop" x1="0%" y1="100%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#16a34a"/>
+              <stop offset="100%" stop-color="#22c55e"/>
+            </linearGradient>
+            <linearGradient id="navKvMLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#15803d"/>
+              <stop offset="100%" stop-color="#166534"/>
+            </linearGradient>
+            <linearGradient id="navKvMRight" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#14532d"/>
+              <stop offset="100%" stop-color="#052e16"/>
+            </linearGradient>
+            <linearGradient id="navKvBLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#166534"/>
+              <stop offset="100%" stop-color="#14532d"/>
+            </linearGradient>
+            <linearGradient id="navKvBRight" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#14532d"/>
+              <stop offset="100%" stop-color="#022c22"/>
+            </linearGradient>
+            <radialGradient id="navKvGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#4ade80" stop-opacity="0.38"/>
+              <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <ellipse cx="18" cy="19" rx="16" ry="13" fill="url(#navKvGlow)"/>
+          <!-- Persistent Base Layer (SSTable) -->
+          <g transform="translate(0, 14)">
+            <path d="M6 7 L18 14 L30 7 L18 0 Z" fill="#15803d" opacity="0.8"/>
+            <path d="M6 7 L18 14 L18 18 L6 11 Z" fill="url(#navKvBLeft)"/>
+            <path d="M18 14 L30 7 L30 11 L18 18 Z" fill="url(#navKvBRight)"/>
+            <path d="M6 11 L18 18 L30 11" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.25"/>
+          </g>
+          <!-- Active Layer 0 (SSTable Level 0) -->
+          <g transform="translate(0, 7)">
+            <path d="M6 7 L18 14 L30 7 L18 0 Z" fill="url(#navKvMTop)"/>
+            <path d="M6 7 L18 14 L18 18 L6 11 Z" fill="url(#navKvMLeft)"/>
+            <path d="M18 14 L30 7 L30 11 L18 18 Z" fill="url(#navKvMRight)"/>
+            <path d="M18 0 L6 7 L18 14 L30 7 Z" stroke="#86efac" stroke-width="0.5" stroke-opacity="0.3"/>
+            <path d="M6 11 L18 18 L30 11" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.35"/>
+          </g>
+          <!-- Floating Memory Core (MemTable / Cache) -->
+          <g>
+            <path d="M6 8 L18 15 L18 19 L6 12 Z" fill="url(#navKvLeft)"/>
+            <path d="M18 15 L30 8 L30 12 L18 19 Z" fill="url(#navKvRight)"/>
+            <path d="M18 1 L30 8 L18 15 L6 8 Z" fill="url(#navKvTop)"/>
+            <path d="M18 1 L6 8 L18 15 L30 8 Z" stroke="#bbf7d0" stroke-width="0.6" stroke-opacity="0.8"/>
+            <path d="M18 15 L18 19" stroke="#86efac" stroke-width="0.6" stroke-opacity="0.7"/>
+            <path d="M6 12 L18 19 L30 12" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.45"/>
+            <path d="M18 4.5 L24 8 L18 11.5 L12 8 Z" fill="#ffffff" fill-opacity="0.2"/>
+          </g>
+        </svg>
         <div class="flex flex-col">
           <span class="font-bold text-lg leading-tight tracking-tight flex items-center space-x-2">
             <span>Apache Kvrocks</span>
@@ -659,12 +741,31 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         },
 
         applyTheme(isDark) {
+          const css = document.createElement('style');
+          css.appendChild(
+            document.createTextNode(
+              '*,*::before,*::after{-webkit-transition:none!important;-moz-transition:none!important;-o-transition:none!important;-ms-transition:none!important;transition:none!important}'
+            )
+          );
+          document.head.appendChild(css);
+
           this.darkMode = isDark;
           if (isDark) {
             document.documentElement.classList.add('dark');
           } else {
             document.documentElement.classList.remove('dark');
           }
+
+          // Force reflow so theme switches atomically without compositor lag
+          void document.documentElement.offsetWidth;
+
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              if (css.parentNode) {
+                css.parentNode.removeChild(css);
+              }
+            });
+          });
         },
 
         getPkgSuffix() {
