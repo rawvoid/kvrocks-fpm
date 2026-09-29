@@ -40,8 +40,8 @@ export function resolveReleaseDownloadUrl(pathname, repo = DEFAULT_GITHUB_REPO) 
     const parts = filename.split("_");
     if (parts.length >= 3) {
       const ver = parts[parts.length - 2];
-      // Verify version follows semver-iteration pattern: X.Y.Z-I or X.Y.Z-tag-I
-      if (/^[0-9]+\.[0-9]+\.[0-9]+(?:-[^._]+)?-[0-9]+$/.test(ver)) {
+      // Verify version follows semver-iteration pattern: X.Y.Z-I or X.Y.Z-tag-I (e.g. 2.17.0-1, 2.17.0-1ubuntu1)
+      if (/^[0-9]+\.[0-9]+\.[0-9]+(?:-[^._]+)?-[0-9A-Za-z.+~]+$/.test(ver)) {
         tag = `v${ver}`;
       }
     }
@@ -49,7 +49,7 @@ export function resolveReleaseDownloadUrl(pathname, repo = DEFAULT_GITHUB_REPO) 
 
   // RPM packages: kvrocks-<ver>-<iter>.<arch>.rpm or kvrocks-legacy-<ver>-<iter>.<arch>.rpm
   else if (filename.endsWith(".rpm")) {
-    const match = filename.match(/-([0-9]+\.[0-9]+\.[0-9]+(?:-[^.]+)?-[0-9]+)\.(?:x86_64|aarch64)\.rpm$/);
+    const match = filename.match(/-(?:legacy-)?([0-9]+\.[0-9]+\.[0-9]+(?:-[^.]+)?-[0-9A-Za-z.+~]+)\.(?:x86_64|aarch64)\.rpm$/);
     if (match) {
       tag = `v${match[1]}`;
     }

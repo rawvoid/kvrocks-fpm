@@ -26,6 +26,12 @@ test("resolveReleaseDownloadUrl - Debian packages", () => {
     resolveReleaseDownloadUrl("/pool/main/kvrocks_2.10.1-10_amd64.deb"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.10.1-10/kvrocks_2.10.1-10_amd64.deb"
   );
+
+  // Alphanumeric revision / distribution tag
+  assert.equal(
+    resolveReleaseDownloadUrl("/pool/main/kvrocks_2.17.0-1ubuntu1_amd64.deb"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1ubuntu1/kvrocks_2.17.0-1ubuntu1_amd64.deb"
+  );
 });
 
 test("resolveReleaseDownloadUrl - RPM packages", () => {
@@ -45,6 +51,16 @@ test("resolveReleaseDownloadUrl - RPM packages", () => {
   assert.equal(
     resolveReleaseDownloadUrl("/rpm/aarch64/kvrocks-2.17.0-1.aarch64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-2.17.0-1.aarch64.rpm"
+  );
+
+  // RPM with distro iteration (e.g. 1.el9)
+  assert.equal(
+    resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-2.17.0-1.el9.x86_64.rpm"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1.el9/kvrocks-2.17.0-1.el9.x86_64.rpm"
+  );
+  assert.equal(
+    resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1.el9/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"
   );
 });
 
