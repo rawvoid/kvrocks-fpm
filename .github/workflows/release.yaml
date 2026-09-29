@@ -31,8 +31,70 @@ on:
         default: true
 
 jobs:
+  preflight:
+    name: Preflight & Release Guard
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.guard.outputs.release_tag }}
+      version: ${{ steps.guard.outputs.version }}
+      iteration: ${{ steps.guard.outputs.iteration }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Inputs & Release Guard
+        id: guard
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_ITERATION: ${{ inputs.iteration }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          IS_DRAFT: ${{ inputs.draft }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${INPUT_VERSION#v}"
+          ITERATION="${INPUT_ITERATION}"
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version must be explicitly provided!"
+            exit 1
+          fi
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Version must match semantic versioning format (e.g. 2.15.0)!"
+            exit 1
+          fi
+
+          if ! echo "$ITERATION" | grep -Eq '^[0-9A-Za-z.+~]+$'; then
+            echo "::error::Iteration must be a valid package revision token (e.g. 1)!"
+            exit 1
+          fi
+
+          RELEASE_TAG="v${VERSION}-${ITERATION}"
+          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "iteration=${ITERATION}" >> $GITHUB_OUTPUT
+
+          # Release Exists Guard: prevent accidental re-releases that poison CDN edge caches
+          if [ "$PUBLISH_RELEASE" = "true" ] && [ "$IS_DRAFT" != "true" ]; then
+            RELEASE_EXISTS=false
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              RELEASE_EXISTS=true
+            elif git ls-remote --tags origin "refs/tags/${RELEASE_TAG}" | grep -q "${RELEASE_TAG}"; then
+              RELEASE_EXISTS=true
+            fi
+
+            if [ "$RELEASE_EXISTS" = "true" ]; then
+              echo "::error title=Release Already Exists::Release ${RELEASE_TAG} already exists on GitHub Releases or remote git tags!"
+              echo "::error::Re-releasing the same version-iteration causes fatal CDN 'Hash Sum mismatch' errors on client machines."
+              echo "::error::Please bump iteration (e.g. iteration=2) instead."
+              exit 1
+            fi
+          fi
+
+          echo "Preflight validation passed: Target Release ${RELEASE_TAG}"
+
   build-and-package:
     name: Build & Package (${{ matrix.arch }}, ${{ matrix.cpu_target }})
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -317,7 +379,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub Release & Repositories
-    needs: build-and-package
+    needs: [preflight, build-and-package]
     if: inputs.publish_release == true || inputs.publish_release == 'true'
     runs-on: ubuntu-latest
     permissions:
