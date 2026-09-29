@@ -525,8 +525,7 @@ jobs:
             mkdir -p existing-pages
           fi
 
-          # 2. Prepare directory skeleton
-          mkdir -p apt-repo/pool/main
+          # 2. Prepare directory skeleton for metadata publishing (Strict Zero-Binary Guarantee)
           mkdir -p apt-repo/dists/stable/main/binary-amd64
           mkdir -p apt-repo/dists/stable/main/binary-arm64
           mkdir -p apt-repo/rpm/x86_64
@@ -554,26 +553,33 @@ jobs:
           # Prepare GPG base arguments (in-memory gpg-agent daemon handles passphrase caching)
           GPG_BASE_ARGS=(--batch --yes --default-key "$GPG_KEY_ID" --pinentry-mode loopback)
 
-          # Stage newly built packages from dist/
-          cp dist/*.deb apt-repo/pool/main/
-          cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
-          cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
+          # 3. Stage newly built packages into temporary isolated sandbox (never copied into apt-repo)
+          mkdir -p staging/deb/pool/main
+          mkdir -p staging/rpm/x86_64
+          mkdir -p staging/rpm/aarch64
 
-          # Verify packages were staged properly
-          if ! ls apt-repo/pool/main/*.deb >/dev/null 2>&1; then
-            echo "::error::No Debian packages found in apt-repo/pool/main/!"
+          cp dist/*.deb staging/deb/pool/main/
+          cp dist/*.x86_64.rpm staging/rpm/x86_64/
+          cp dist/*.aarch64.rpm staging/rpm/aarch64/
+
+          # Verify packages were staged properly in sandbox
+          if ! ls staging/deb/pool/main/*.deb >/dev/null 2>&1; then
+            echo "::error::No Debian packages found in staging!"
             exit 1
           fi
 
           # ==========================================
-          # 3. Build Debian APT Metadata (Incremental Merge)
+          # 4. Build Debian APT Metadata (Incremental Merge)
           # ==========================================
           ROOT_DIR="$(pwd)"
           (
+            # Generate Packages.new from staging sandbox so 'pool/main/...' relative paths are preserved
+            cd staging/deb
+            dpkg-scanpackages -m --arch amd64 pool/main > "${ROOT_DIR}/apt-repo/dists/stable/main/binary-amd64/Packages.new"
+            dpkg-scanpackages -m --arch arm64 pool/main > "${ROOT_DIR}/apt-repo/dists/stable/main/binary-arm64/Packages.new"
+          )
+          (
             cd apt-repo
-            dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages.new
-            dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages.new
-
             OLD_AMD64="${ROOT_DIR}/existing-pages/dists/stable/main/binary-amd64/Packages"
             OLD_ARM64="${ROOT_DIR}/existing-pages/dists/stable/main/binary-arm64/Packages"
 
@@ -614,30 +620,27 @@ jobs:
           )
 
           # ==========================================
-          # 4. Build RPM Metadata (Incremental Merge using mergerepo_c)
+          # 5. Build RPM Metadata (Incremental Merge using mergerepo_c)
           # ==========================================
           for arch in x86_64 aarch64; do
             echo "=== Generating RPM Metadata for ${arch} ==="
-            if ! ls "apt-repo/rpm/${arch}/"*.rpm >/dev/null 2>&1; then
-              echo "::error::No RPM packages found in apt-repo/rpm/${arch}/!"
+            if ! ls "staging/rpm/${arch}/"*.rpm >/dev/null 2>&1; then
+              echo "::error::No RPM packages found in staging/rpm/${arch}/!"
               exit 1
             fi
 
-            mkdir -p "new-repo/rpm/${arch}"
-            cp "apt-repo/rpm/${arch}/"*.rpm "new-repo/rpm/${arch}/"
-            createrepo_c "new-repo/rpm/${arch}/"
+            createrepo_c "staging/rpm/${arch}/"
 
             if [ -d "existing-pages/rpm/${arch}/repodata" ]; then
               echo "Merging RPM repository metadata for ${arch}..."
-              mkdir -p "apt-repo/rpm/${arch}"
               mergerepo_c --all \
                 --repo "existing-pages/rpm/${arch}/" \
-                --repo "new-repo/rpm/${arch}/" \
+                --repo "staging/rpm/${arch}/" \
                 -o "apt-repo/rpm/${arch}/"
             else
               echo "Initializing new RPM repository metadata for ${arch}..."
               mkdir -p "apt-repo/rpm/${arch}"
-              cp -r "new-repo/rpm/${arch}/repodata" "apt-repo/rpm/${arch}/"
+              cp -r "staging/rpm/${arch}/repodata" "apt-repo/rpm/${arch}/"
             fi
 
             if [ ! -f "apt-repo/rpm/${arch}/repodata/repomd.xml" ]; then
@@ -650,24 +653,22 @@ jobs:
               -o "apt-repo/rpm/${arch}/repodata/repomd.xml.asc" "apt-repo/rpm/${arch}/repodata/repomd.xml"
             gpg --verify "apt-repo/rpm/${arch}/repodata/repomd.xml.asc" "apt-repo/rpm/${arch}/repodata/repomd.xml"
           done
-          rm -rf new-repo existing-pages
+          rm -rf staging existing-pages
 
           # ==========================================
-          # 5. Purge Binary Packages from apt-repo (Zero-Binary Hosting)
+          # 6. Quality Gate: Zero-Binary Invariant Audit
           # ==========================================
+          # Ensure apt-repo contains strictly metadata (<100KB), completely eliminating quota limits.
           # Binary packages are permanently hosted on GitHub Releases and streamed via Cloudflare Edge Gateway.
-          # GitHub Pages hosts ONLY lightweight repository metadata (<100KB), completely eliminating quota limits.
-          echo "=== Purging binary packages to keep GitHub Pages featherweight (<100KB) ==="
-          rm -rf apt-repo/pool
-          rm -f apt-repo/rpm/x86_64/*.rpm
-          rm -f apt-repo/rpm/aarch64/*.rpm
+          LEAKED_PACKAGES=$(find apt-repo -type f \( -name "*.deb" -o -name "*.rpm" \))
+          if [ -n "$LEAKED_PACKAGES" ]; then
+            echo "::error title=Binary Leak Detected::Package binaries unexpectedly found in metadata repository:"
+            echo "$LEAKED_PACKAGES"
+            exit 1
+          fi
 
           TOTAL_PAGES_KB=$(du -sk apt-repo | cut -f1)
           echo "Total metadata repository footprint: ${TOTAL_PAGES_KB} KB"
-          if [ "$TOTAL_PAGES_KB" -gt 5000 ]; then
-            echo "::error::Metadata repository size exceeds 5MB! Check for leaked binary files."
-            exit 1
-          fi
 
           echo "### Dual APT & RPM Metadata Repositories Generated" >> $GITHUB_STEP_SUMMARY
           echo "- **Edge Gateway Endpoint**: \`${GATEWAY_URL}\`" >> $GITHUB_STEP_SUMMARY
