@@ -29,14 +29,6 @@ on:
         type: boolean
         required: true
         default: true
-      channel:
-        description: 'Distribution Channel (stable or testing)'
-        type: choice
-        options:
-          - stable
-          - testing
-        required: true
-        default: 'stable'
 
 jobs:
   preflight:
@@ -47,6 +39,7 @@ jobs:
       version: ${{ steps.guard.outputs.version }}
       iteration: ${{ steps.guard.outputs.iteration }}
       channel: ${{ steps.guard.outputs.channel }}
+      is_prerelease: ${{ steps.guard.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,14 +48,12 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_ITERATION: ${{ inputs.iteration }}
-          INPUT_CHANNEL: ${{ inputs.channel }}
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
           IS_DRAFT: ${{ inputs.draft }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${INPUT_VERSION#v}"
           ITERATION="${INPUT_ITERATION}"
-          CHANNEL="${INPUT_CHANNEL:-stable}"
 
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
@@ -70,7 +61,7 @@ jobs:
           fi
 
           if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
-            echo "::error::Version must match semantic versioning format (e.g. 2.15.0)!"
+            echo "::error::Version must match semantic versioning format (e.g. 2.15.0 or 2.15.0-rc1)!"
             exit 1
           fi
 
@@ -79,9 +70,13 @@ jobs:
             exit 1
           fi
 
-          if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "testing" ]; then
-            echo "::error::Channel must be either 'stable' or 'testing'!"
-            exit 1
+          # Automatically deduce distribution channel and prerelease flag from version semantics
+          if echo "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
+            CHANNEL="stable"
+            IS_PRERELEASE="false"
+          else
+            CHANNEL="testing"
+            IS_PRERELEASE="true"
           fi
 
           RELEASE_TAG="v${VERSION}-${ITERATION}"
@@ -89,6 +84,7 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "iteration=${ITERATION}" >> $GITHUB_OUTPUT
           echo "channel=${CHANNEL}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
 
           # Release Exists Guard: prevent accidental re-releases that poison CDN edge caches
           if [ "$PUBLISH_RELEASE" = "true" ] && [ "$IS_DRAFT" != "true" ]; then
@@ -375,6 +371,7 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
       ITERATION: ${{ needs.preflight.outputs.iteration }}
       CHANNEL: ${{ needs.preflight.outputs.channel }}
+      IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v4
 
@@ -448,6 +445,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
           draft: ${{ inputs.draft == true || inputs.draft == 'true' }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
           files: |
             dist/*.deb
             dist/*.rpm
@@ -651,7 +649,7 @@ jobs:
           echo "Total metadata repository footprint: ${TOTAL_PAGES_KB} KB"
 
           echo "### Dual APT & RPM Metadata Repositories Generated (${CHANNEL})" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release Channel**: \`${CHANNEL}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Channel**: \`${CHANNEL}\` ($( [ "$IS_PRERELEASE" = "true" ] && echo "Pre-release / Testing" || echo "Stable Production" ))" >> $GITHUB_STEP_SUMMARY
           echo "- **Edge Gateway Endpoint**: \`${GATEWAY_URL}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **APT Repository (via Gateway)**: \`${GATEWAY_URL} ${CHANNEL} main\`" >> $GITHUB_STEP_SUMMARY
           echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/${RPM_CHANNEL_REL_PATH}/\$basearch/\`" >> $GITHUB_STEP_SUMMARY

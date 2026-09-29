@@ -32,6 +32,12 @@ test("resolveReleaseDownloadUrl - Debian packages", () => {
     resolveReleaseDownloadUrl("/pool/main/kvrocks_2.17.0-1ubuntu1_amd64.deb"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1ubuntu1/kvrocks_2.17.0-1ubuntu1_amd64.deb"
   );
+
+  // Pre-release package (RC / testing)
+  assert.equal(
+    resolveReleaseDownloadUrl("/pool/main/kvrocks_2.15.0-rc1-1_amd64.deb"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.15.0-rc1-1/kvrocks_2.15.0-rc1-1_amd64.deb"
+  );
 });
 
 test("resolveReleaseDownloadUrl - RPM packages", () => {
@@ -71,6 +77,12 @@ test("resolveReleaseDownloadUrl - RPM packages", () => {
   assert.equal(
     resolveReleaseDownloadUrl("/rpm/testing/aarch64/kvrocks-2.17.0-1.aarch64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-2.17.0-1.aarch64.rpm"
+  );
+
+  // Pre-release package in testing channel (e.g. rc1)
+  assert.equal(
+    resolveReleaseDownloadUrl("/rpm/testing/x86_64/kvrocks-2.15.0-rc1-1.x86_64.rpm"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.15.0-rc1-1/kvrocks-2.15.0-rc1-1.x86_64.rpm"
   );
 });
 
