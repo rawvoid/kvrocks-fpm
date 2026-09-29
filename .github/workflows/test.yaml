@@ -22,6 +22,15 @@ jobs:
         run: |
           python3 -m unittest discover -s packaging -p "test_*.py" -v
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run Gateway Unit Tests
+        run: |
+          npm --prefix gateway test
+
       - name: Run Shellcheck
         run: |
           shellcheck scripts/install.sh packaging/hooks/*.sh

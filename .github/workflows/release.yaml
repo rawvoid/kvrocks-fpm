@@ -448,12 +448,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm xz-utils
 
-          # 1. Checkout existing gh-pages deployment if it exists to preserve historical metadata
-          mkdir -p existing-pages
-          if git clone --depth 1 --branch gh-pages "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" existing-pages 2>/dev/null; then
+          # 1. Safely retrieve existing gh-pages deployment to preserve historical metadata
+          # Check if gh-pages branch genuinely exists on remote before cloning.
+          # If it exists on remote, git clone MUST succeed. If clone fails, abort immediately to protect historical records!
+          REMOTE_REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          HAS_PAGES=$(git ls-remote --heads "$REMOTE_REPO_URL" refs/heads/gh-pages | wc -l)
+
+          rm -rf existing-pages
+          if [ "$HAS_PAGES" -gt 0 ]; then
+            echo "Existing gh-pages branch detected on remote. Cloning historical deployment..."
+            git clone --depth 1 --branch gh-pages "$REMOTE_REPO_URL" existing-pages
             echo "Successfully retrieved existing gh-pages branch. Historical metadata will be preserved."
           else
-            echo "No existing gh-pages deployment found. Initializing fresh repository."
+            echo "No existing gh-pages branch found on remote. Initializing fresh repository."
+            mkdir -p existing-pages
           fi
 
           # 2. Prepare directory skeleton
@@ -490,6 +498,12 @@ jobs:
           cp dist/*.deb apt-repo/pool/main/
           cp dist/*.x86_64.rpm apt-repo/rpm/x86_64/
           cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
+
+          # Verify packages were staged properly
+          if ! ls apt-repo/pool/main/*.deb >/dev/null 2>&1; then
+            echo "::error::No Debian packages found in apt-repo/pool/main/!"
+            exit 1
+          fi
 
           # ==========================================
           # 3. Build Debian APT Metadata (Incremental Merge)
@@ -533,6 +547,10 @@ jobs:
             # Debian SecureApt standardizes on SHA512
             gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 --clearsign -o InRelease Release
             gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 -abs -o Release.gpg Release
+
+            # Verify generated signatures immediately
+            gpg --verify InRelease
+            gpg --verify Release.gpg Release
           )
 
           # ==========================================
@@ -540,6 +558,11 @@ jobs:
           # ==========================================
           for arch in x86_64 aarch64; do
             echo "=== Generating RPM Metadata for ${arch} ==="
+            if ! ls "apt-repo/rpm/${arch}/"*.rpm >/dev/null 2>&1; then
+              echo "::error::No RPM packages found in apt-repo/rpm/${arch}/!"
+              exit 1
+            fi
+
             mkdir -p "new-repo/rpm/${arch}"
             cp "apt-repo/rpm/${arch}/"*.rpm "new-repo/rpm/${arch}/"
             createrepo_c "new-repo/rpm/${arch}/"
@@ -555,6 +578,11 @@ jobs:
               echo "Initializing new RPM repository metadata for ${arch}..."
               mkdir -p "apt-repo/rpm/${arch}"
               cp -r "new-repo/rpm/${arch}/repodata" "apt-repo/rpm/${arch}/"
+            fi
+
+            if [ ! -f "apt-repo/rpm/${arch}/repodata/repomd.xml" ]; then
+              echo "::error::RPM repomd.xml was not generated for ${arch}!"
+              exit 1
             fi
 
             # RPM detached GPG signature
