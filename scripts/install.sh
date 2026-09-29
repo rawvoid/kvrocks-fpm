@@ -95,10 +95,11 @@ is_rhel_derivative() {
 
 main() {
     REPO_URL="${KVROCKS_REPO_URL:-https://kvrocks.kryo.eu.org}"
+    REPO_URL="${REPO_URL%/}"
 
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
-        error "This script must be run as root. Please run: curl -fsSL ${REPO_URL}/install.sh | sudo bash"
+        error "This script must be run as root."
     fi
 
     printf '%b' "${CYAN}${BOLD}"
@@ -114,12 +115,15 @@ EOF
     printf '%b\n' "${NC}"
 
     # 2. Check OS distribution
-    if [ ! -f /etc/os-release ]; then
-        error "Cannot determine operating system. /etc/os-release is missing."
+    if [ -f /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        . /etc/os-release
+    elif [ -f /usr/lib/os-release ]; then
+        # shellcheck source=/dev/null
+        . /usr/lib/os-release
+    else
+        error "Cannot determine operating system. Neither /etc/os-release nor /usr/lib/os-release was found."
     fi
-
-    # shellcheck source=/dev/null
-    . /etc/os-release
 
     OS_ID="$(echo "${ID:-}" | tr '[:upper:]' '[:lower:]')"
     OS_LIKE="$(echo "${ID_LIKE:-}" | tr '[:upper:]' '[:lower:]')"
@@ -191,22 +195,10 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
 
     # Allow environment override: e.g. KVROCKS_FLAVOR=legacy, generic, or default
     if [ -n "${KVROCKS_FLAVOR:-}" ]; then
-        FLAVOR="$(echo "$KVROCKS_FLAVOR" | tr '[:upper:]' '[:lower:]')"
-        case "$FLAVOR" in
-            generic)
-                if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-                    TARGET_PACKAGE="kvrocks"
-                    CPU_DETAIL="Standard (${ARCH})"
-                else
-                    TARGET_PACKAGE="kvrocks-legacy"
-                    CPU_DETAIL="Forced Legacy (generic) by KVROCKS_FLAVOR"
-                fi
-                ;;
-            legacy|v1)
+        case "$(echo "$KVROCKS_FLAVOR" | tr '[:upper:]' '[:lower:]')" in
+            legacy|v1|generic)
                 if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
                     warn "Legacy flavor is only available for x86_64/amd64 architecture. Using default kvrocks package for ${ARCH}."
-                    TARGET_PACKAGE="kvrocks"
-                    CPU_DETAIL="Standard (${ARCH})"
                 else
                     TARGET_PACKAGE="kvrocks-legacy"
                     CPU_DETAIL="Forced Legacy by KVROCKS_FLAVOR"
@@ -214,10 +206,8 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
                 ;;
             default|v3|avx2)
                 TARGET_PACKAGE="kvrocks"
-                if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-                    CPU_DETAIL="Standard (${ARCH})"
-                else
-                    CPU_DETAIL="Forced Default (v3) by KVROCKS_FLAVOR"
+                if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ]; then
+                    CPU_DETAIL="Forced Default by KVROCKS_FLAVOR"
                 fi
                 ;;
             *)
@@ -305,7 +295,13 @@ EOF
     fi
 
     # 6. Installation verification and summary
-    KVROCKS_BIN="$(command -v kvrocks 2>/dev/null || ([ -x /usr/bin/kvrocks ] && echo "/usr/bin/kvrocks") || echo "")"
+    KVROCKS_BIN=""
+    if [ -x /usr/bin/kvrocks ]; then
+        KVROCKS_BIN="/usr/bin/kvrocks"
+    elif command -v kvrocks >/dev/null 2>&1; then
+        KVROCKS_BIN="$(command -v kvrocks)"
+    fi
+
     if [ -n "$KVROCKS_BIN" ]; then
         if INSTALLED_VER="$("$KVROCKS_BIN" --version 2>&1)" || INSTALLED_VER="$("$KVROCKS_BIN" -v 2>&1)"; then
             success "Kvrocks successfully installed: ${INSTALLED_VER}"
@@ -315,7 +311,7 @@ Dynamic linker or runtime dependency error:
 ${INSTALLED_VER}"
         fi
     else
-        error "Package installation command completed, but kvrocks binary was not found in PATH or /usr/bin/."
+        error "Package installation command completed, but kvrocks binary was not found in /usr/bin/ or PATH."
     fi
 
     printf '\n%b%b=== Getting Started with Apache Kvrocks ===%b\n' "${GREEN}" "${BOLD}" "${NC}"
@@ -325,7 +321,7 @@ ${INSTALLED_VER}"
         printf '  • Check status:    %b\n' "${CYAN}sudo systemctl status kvrocks${NC}"
         printf '  • View logs:       %b\n' "${CYAN}sudo journalctl -u kvrocks -f${NC}"
     else
-        printf '  • Start service:   %b\n' "${CYAN}kvrocks /etc/kvrocks/kvrocks.conf${NC}"
+        printf '  • Start service:   %b\n' "${CYAN}kvrocks -c /etc/kvrocks/kvrocks.conf${NC}"
         printf '  • View logs:       %b\n' "${CYAN}tail -f /var/log/kvrocks/kvrocks_*.log${NC}"
     fi
     printf '  • Connect:         %b\n' "${CYAN}redis-cli -p 6666 ping${NC}"
