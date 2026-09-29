@@ -434,7 +434,7 @@ jobs:
 
           mkdir -p ~/.gnupg
           chmod 700 ~/.gnupg
-          echo "allow-loopback-pinentry" > ~/.gnupg/gpg-agent.conf
+          printf 'allow-loopback-pinentry\ndefault-cache-ttl 3600\nmax-cache-ttl 7200\n' > ~/.gnupg/gpg-agent.conf
           gpg-connect-agent reloadagent /bye 2>/dev/null || true
 
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
@@ -442,17 +442,16 @@ jobs:
           echo "Loaded GPG signing key: $GPG_KEY_ID"
           echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
 
-          # Configure RPM macros for package signing
-          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
+          # Prime gpg-agent in-memory cache via stdin pipeline (avoids writing passphrase to disk)
           if [ -n "$GPG_PASSPHRASE" ]; then
-            echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
-            chmod 600 /tmp/gpg_passphrase
-            trap 'rm -f /tmp/gpg_passphrase /tmp/kvrocks-signing-key.asc' EXIT
-            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
-          else
-            trap 'rm -f /tmp/kvrocks-signing-key.asc' EXIT
-            printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
+            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -u "$GPG_KEY_ID" -sbo /dev/null /dev/null
           fi
+
+          trap 'rm -f /tmp/kvrocks-signing-key.asc' EXIT
+
+          # Configure RPM macros for package signing (gpg-agent daemon handles passphrase in-memory)
+          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path ~/.gnupg\n%%_gpg_digest_algo sha256\n' "$GPG_KEY_ID" > ~/.rpmmacros
+          printf '%%__gpg_sign_cmd %%{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
 
           echo "Signing RPM packages in dist/..."
           rpmsign --addsign dist/*.rpm
@@ -547,14 +546,13 @@ jobs:
           printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" > apt-repo/kvrocks.repo
           touch apt-repo/.nojekyll
 
-          # Prepare GPG base arguments with secure passphrase file handling
-          GPG_BASE_ARGS=(--batch --yes --default-key "$GPG_KEY_ID")
+          # Prime gpg-agent in-memory cache via stdin pipeline if needed (avoids writing passphrase to disk)
           if [ -n "$GPG_PASSPHRASE" ]; then
-            echo "$GPG_PASSPHRASE" > /tmp/gpg_passphrase
-            chmod 600 /tmp/gpg_passphrase
-            trap 'rm -f /tmp/gpg_passphrase' EXIT
-            GPG_BASE_ARGS+=(--pinentry-mode loopback --passphrase-file /tmp/gpg_passphrase)
+            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -u "$GPG_KEY_ID" -sbo /dev/null /dev/null
           fi
+
+          # Prepare GPG base arguments (in-memory gpg-agent daemon handles passphrase caching)
+          GPG_BASE_ARGS=(--batch --yes --default-key "$GPG_KEY_ID" --pinentry-mode loopback)
 
           # Stage newly built packages from dist/
           cp dist/*.deb apt-repo/pool/main/
