@@ -1,4 +1,4 @@
-name: Sync Pages Assets
+name: Pages
 
 concurrency:
   group: pages-repository-deployment
@@ -14,39 +14,46 @@ on:
 
 jobs:
   sync-pages:
-    name: Sync Static Assets to gh-pages
+    name: Validate and Sync to gh-pages
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout main repository
+      - name: Checkout Main Repository
         uses: actions/checkout@v4
         with:
           path: main-repo
 
-      - name: Checkout gh-pages branch
+      - name: Validate Install Script
+        run: |
+          if [ -f main-repo/scripts/install.sh ]; then
+            shellcheck main-repo/scripts/install.sh
+            bash -n main-repo/scripts/install.sh
+          fi
+
+      - name: Checkout GitHub Pages Branch
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages-branch
 
-      - name: Sync Static Assets to gh-pages
+      - name: Sync Assets to gh-pages
         run: |
-          # Synchronize standalone static assets maintained in main to the root of gh-pages
-          # 1. Automated Installer Script
+          # 1. Synchronize automated installer script
           if [ -f main-repo/scripts/install.sh ]; then
-            cp main-repo/scripts/install.sh gh-pages-branch/install.sh
+            cp -p main-repo/scripts/install.sh gh-pages-branch/install.sh
           fi
 
           cd gh-pages-branch
 
-          # Check if any tracked or untracked files changed
-          if git diff --quiet && [ -z "$(git status --porcelain)" ]; then
+          # 2. Skip commit if there are no changes
+          if [ -z "$(git status --porcelain)" ]; then
             echo "Static assets on gh-pages are already up to date. Nothing to commit."
             exit 0
           fi
 
+          # 3. Commit and push changes
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
