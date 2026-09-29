@@ -129,6 +129,42 @@ SHA256: newhash
         self.assertIn("SHA256: newhash", stanzas[0])
         self.assertNotIn("SHA256: oldhash", stanzas[0])
 
+    def test_merge_missing_new_file_raises_error(self):
+        nonexistent_file = os.path.join(self.temp_dir.name, "nonexistent.Packages")
+        out_file = os.path.join(self.temp_dir.name, "Packages")
+        with self.assertRaises(FileNotFoundError):
+            merge_packages(None, nonexistent_file, out_file)
+
+    def test_merge_empty_new_file_raises_error(self):
+        empty_file = os.path.join(self.temp_dir.name, "empty.Packages")
+        with open(empty_file, "w", encoding="utf-8") as f:
+            f.write("\n   \n\n")
+        out_file = os.path.join(self.temp_dir.name, "Packages")
+        with self.assertRaises(ValueError):
+            merge_packages(None, empty_file, out_file)
+
+    def test_merge_invalid_stanza_raises_error(self):
+        invalid_file = os.path.join(self.temp_dir.name, "invalid.Packages")
+        with open(invalid_file, "w", encoding="utf-8") as f:
+            f.write("Package: kvrocks\n# Missing Architecture and Version\n")
+        out_file = os.path.join(self.temp_dir.name, "Packages")
+        with self.assertRaises(ValueError):
+            merge_packages(None, invalid_file, out_file)
+
+    def test_merge_nonexistent_old_file_raises_error(self):
+        new_content = """Package: kvrocks
+Version: 2.15.0-1
+Architecture: amd64
+Filename: pool/main/kvrocks_2.15.0-1_amd64.deb
+"""
+        new_file = os.path.join(self.temp_dir.name, "Packages.new")
+        with open(new_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        out_file = os.path.join(self.temp_dir.name, "Packages")
+
+        with self.assertRaises(FileNotFoundError):
+            merge_packages("/nonexistent/path/Packages", new_file, out_file)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,7 +55,9 @@ def merge_packages(old_file: Optional[str], new_file: str, output_file: str) -> 
     merged: Dict[Tuple[str, str, str], str] = {}
 
     # 1. Load existing stanzas if old_file exists and is readable
-    if old_file and os.path.isfile(old_file):
+    if old_file:
+        if not os.path.isfile(old_file):
+            raise FileNotFoundError(f"Existing packages file specified but not found: {old_file}")
         with open(old_file, "r", encoding="utf-8", errors="replace") as f:
             old_stanzas = parse_stanzas(f.read())
         for stanza in old_stanzas:
@@ -63,16 +65,21 @@ def merge_packages(old_file: Optional[str], new_file: str, output_file: str) -> 
             if key:
                 merged[key] = stanza
 
-    # 2. Load and overlay new stanzas
-    if os.path.isfile(new_file):
-        with open(new_file, "r", encoding="utf-8", errors="replace") as f:
-            new_stanzas = parse_stanzas(f.read())
-        for stanza in new_stanzas:
-            key = extract_stanza_key(stanza)
-            if key:
-                merged[key] = stanza
-    else:
-        print(f"Warning: New packages file not found: {new_file}", file=sys.stderr)
+    # 2. Load and overlay new stanzas (must exist and contain valid stanzas)
+    if not os.path.isfile(new_file):
+        raise FileNotFoundError(f"New packages file not found: {new_file}")
+
+    with open(new_file, "r", encoding="utf-8", errors="replace") as f:
+        new_stanzas = parse_stanzas(f.read())
+
+    if not new_stanzas:
+        raise ValueError(f"New packages file {new_file} contains no package stanzas")
+
+    for stanza in new_stanzas:
+        key = extract_stanza_key(stanza)
+        if not key:
+            raise ValueError(f"Failed to extract (Package, Architecture, Version) key from stanza in {new_file}:\n{stanza}")
+        merged[key] = stanza
 
     # 3. Format output
     output_lines = []
@@ -83,14 +90,23 @@ def merge_packages(old_file: Optional[str], new_file: str, output_file: str) -> 
     if out_content:
         out_content += "\n"
 
-    # 4. Atomic write
+    # 4. Atomic write with cleanup on error
     out_dir = os.path.dirname(os.path.abspath(output_file))
     os.makedirs(out_dir, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", dir=out_dir, encoding="utf-8", delete=False) as tf:
-        tf.write(out_content)
-        temp_name = tf.name
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=out_dir, encoding="utf-8", delete=False) as tf:
+            tf.write(out_content)
+            temp_name = tf.name
+        os.replace(temp_name, output_file)
+    except Exception:
+        if temp_name and os.path.exists(temp_name):
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+        raise
 
-    os.replace(temp_name, output_file)
     print(f"Successfully merged {len(merged)} package stanza(s) into {output_file}")
 
 
