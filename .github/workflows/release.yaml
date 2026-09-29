@@ -4,6 +4,9 @@ concurrency:
   group: pages-repository-deployment
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -87,11 +90,12 @@ jobs:
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
 
       - name: Resolve Version & Iteration
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_ITERATION: ${{ inputs.iteration }}
         run: |
-          VERSION="${{ inputs.version }}"
-          ITERATION="${{ inputs.iteration }}"
-
-          VERSION="${VERSION#v}"
+          VERSION="${INPUT_VERSION#v}"
+          ITERATION="${INPUT_ITERATION}"
 
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
@@ -116,6 +120,7 @@ jobs:
         run: |
           export PATH="/usr/lib/ccache:$PATH"
           export CCACHE_DIR="$HOME/.cache/ccache"
+          export CCACHE_MAXSIZE="1G"
           export LDFLAGS="-static-libstdc++ -static-libgcc $LDFLAGS"
           # Inject -g to generate comprehensive DWARF debug symbols alongside -O3 optimizations
           export CFLAGS="-g ${{ matrix.extra_flags }}"
@@ -311,7 +316,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Publish GitHub Release
+    name: Publish GitHub Release & Repositories
     needs: build-and-package
     if: inputs.publish_release == true || inputs.publish_release == 'true'
     runs-on: ubuntu-latest
@@ -327,11 +332,12 @@ jobs:
           merge-multiple: true
 
       - name: Resolve Release Tag & Name
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_ITERATION: ${{ inputs.iteration }}
         run: |
-          VERSION="${{ inputs.version }}"
-          ITERATION="${{ inputs.iteration }}"
-
-          VERSION="${VERSION#v}"
+          VERSION="${INPUT_VERSION#v}"
+          ITERATION="${INPUT_ITERATION}"
 
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
@@ -416,7 +422,11 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
           draft: ${{ inputs.draft == true || inputs.draft == 'true' }}
-          files: dist/*
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/SHA256SUMS
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -428,15 +438,25 @@ jobs:
           echo "- **Status**: Draft release \`${{ env.RELEASE_TAG }}\` created on GitHub Releases." >> $GITHUB_STEP_SUMMARY
           echo "- **Note**: Deployment to GitHub Pages skipped. Draft releases are not published to online APT/RPM repositories." >> $GITHUB_STEP_SUMMARY
 
-      - name: Build Debian APT & RPM Repositories
+      - name: Build Debian APT & RPM Repositories (Incremental Merge)
         if: inputs.draft != true && inputs.draft != 'true'
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           KVROCKS_GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm
+          sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm xz-utils
 
+          # 1. Checkout existing gh-pages deployment if it exists to preserve historical metadata
+          mkdir -p existing-pages
+          if git clone --depth 1 --branch gh-pages "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" existing-pages 2>/dev/null; then
+            echo "Successfully retrieved existing gh-pages branch. Historical metadata will be preserved."
+          else
+            echo "No existing gh-pages deployment found. Initializing fresh repository."
+          fi
+
+          # 2. Prepare directory skeleton
           mkdir -p apt-repo/pool/main
           mkdir -p apt-repo/dists/stable/main/binary-amd64
           mkdir -p apt-repo/dists/stable/main/binary-arm64
@@ -472,15 +492,32 @@ jobs:
           cp dist/*.aarch64.rpm apt-repo/rpm/aarch64/
 
           # ==========================================
-          # 1. Build Debian APT Repository Metadata
+          # 3. Build Debian APT Metadata (Incremental Merge)
           # ==========================================
+          ROOT_DIR="$(pwd)"
           (
             cd apt-repo
-            dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
-            gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+            dpkg-scanpackages -m --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages.new
+            dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages.new
 
-            dpkg-scanpackages -m --arch arm64 pool/main > dists/stable/main/binary-arm64/Packages
+            OLD_AMD64="${ROOT_DIR}/existing-pages/dists/stable/main/binary-amd64/Packages"
+            OLD_ARM64="${ROOT_DIR}/existing-pages/dists/stable/main/binary-arm64/Packages"
+
+            [ -f "$OLD_AMD64" ] || OLD_AMD64="none"
+            [ -f "$OLD_ARM64" ] || OLD_ARM64="none"
+
+            echo "=== Merging Debian APT Packages (amd64) ==="
+            python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$OLD_AMD64" dists/stable/main/binary-amd64/Packages.new dists/stable/main/binary-amd64/Packages
+            echo "=== Merging Debian APT Packages (arm64) ==="
+            python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$OLD_ARM64" dists/stable/main/binary-arm64/Packages.new dists/stable/main/binary-arm64/Packages
+            rm -f dists/stable/main/binary-amd64/Packages.new dists/stable/main/binary-arm64/Packages.new
+
+            # Compress Packages with both gzip and xz
+            gzip -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.gz
+            xz -9c dists/stable/main/binary-amd64/Packages > dists/stable/main/binary-amd64/Packages.xz
+
             gzip -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.gz
+            xz -9c dists/stable/main/binary-arm64/Packages > dists/stable/main/binary-arm64/Packages.xz
 
             cd dists/stable
             apt-ftparchive \
@@ -499,20 +536,36 @@ jobs:
           )
 
           # ==========================================
-          # 2. Build RPM Repository Metadata & Signing
+          # 4. Build RPM Metadata (Incremental Merge using mergerepo_c)
           # ==========================================
-          createrepo_c apt-repo/rpm/x86_64/
-          createrepo_c apt-repo/rpm/aarch64/
+          for arch in x86_64 aarch64; do
+            echo "=== Generating RPM Metadata for ${arch} ==="
+            mkdir -p "new-repo/rpm/${arch}"
+            cp "apt-repo/rpm/${arch}/"*.rpm "new-repo/rpm/${arch}/"
+            createrepo_c "new-repo/rpm/${arch}/"
 
-          # RPM / repomd standardizes on SHA256 detached signature
-          gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor -o apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
-          gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor -o apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
+            if [ -d "existing-pages/rpm/${arch}/repodata" ]; then
+              echo "Merging RPM repository metadata for ${arch}..."
+              mkdir -p "apt-repo/rpm/${arch}"
+              mergerepo_c --all \
+                --repo "existing-pages/rpm/${arch}/" \
+                --repo "new-repo/rpm/${arch}/" \
+                -o "apt-repo/rpm/${arch}/"
+            else
+              echo "Initializing new RPM repository metadata for ${arch}..."
+              mkdir -p "apt-repo/rpm/${arch}"
+              cp -r "new-repo/rpm/${arch}/repodata" "apt-repo/rpm/${arch}/"
+            fi
 
-          gpg --verify apt-repo/rpm/x86_64/repodata/repomd.xml.asc apt-repo/rpm/x86_64/repodata/repomd.xml
-          gpg --verify apt-repo/rpm/aarch64/repodata/repomd.xml.asc apt-repo/rpm/aarch64/repodata/repomd.xml
+            # RPM detached GPG signature
+            gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor \
+              -o "apt-repo/rpm/${arch}/repodata/repomd.xml.asc" "apt-repo/rpm/${arch}/repodata/repomd.xml"
+            gpg --verify "apt-repo/rpm/${arch}/repodata/repomd.xml.asc" "apt-repo/rpm/${arch}/repodata/repomd.xml"
+          done
+          rm -rf new-repo existing-pages
 
           # ==========================================
-          # 3. Purge Binary Packages from apt-repo (Zero-Binary Hosting)
+          # 5. Purge Binary Packages from apt-repo (Zero-Binary Hosting)
           # ==========================================
           # Binary packages are permanently hosted on GitHub Releases and streamed via Cloudflare Edge Gateway.
           # GitHub Pages hosts ONLY lightweight repository metadata (<100KB), completely eliminating quota limits.
@@ -534,7 +587,7 @@ jobs:
           echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **YUM / DNF Repo Config**: \`${GATEWAY_URL}/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GPG Public Key (ASCII)**: \`${GATEWAY_URL}/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, no 1GB quota limit)" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, multi-version retention enabled)" >> $GITHUB_STEP_SUMMARY
           echo "- **Binary Asset Storage**: Hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) & stream-cached at Cloudflare Edge." >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy Repositories to GitHub Pages

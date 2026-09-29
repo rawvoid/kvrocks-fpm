@@ -129,11 +129,11 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
 * **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`).
 * **GitHub CLI (`gh`)**:
   ```bash
-  # Build and publish release (packages + APT repository deployment)
-  gh workflow run ci.yaml -f version=2.15.0 -f iteration=1
+  # Build and publish release (packages + APT & RPM repository deployment)
+  gh workflow run release.yaml -f version=2.15.0 -f iteration=1
 
-  # Dry-run / test build only (without creating GitHub release or updating APT repository)
-  gh workflow run ci.yaml -f version=2.15.0 -f iteration=1 -f publish_release=false
+  # Dry-run / test build only (without creating GitHub release or updating repositories)
+  gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f publish_release=false
   ```
 
 ---
