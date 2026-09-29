@@ -62,6 +62,16 @@ test("resolveReleaseDownloadUrl - RPM packages", () => {
     resolveReleaseDownloadUrl("/rpm/x86_64/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"),
     "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1.el9/kvrocks-legacy-2.17.0-1.el9.x86_64.rpm"
   );
+
+  // Testing channel RPM packages
+  assert.equal(
+    resolveReleaseDownloadUrl("/rpm/testing/x86_64/kvrocks-2.17.0-1.x86_64.rpm"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-2.17.0-1.x86_64.rpm"
+  );
+  assert.equal(
+    resolveReleaseDownloadUrl("/rpm/testing/aarch64/kvrocks-2.17.0-1.aarch64.rpm"),
+    "https://github.com/rawvoid/kvrocks-fpm/releases/download/v2.17.0-1/kvrocks-2.17.0-1.aarch64.rpm"
+  );
 });
 
 test("resolveReleaseDownloadUrl - Custom repository slug", () => {

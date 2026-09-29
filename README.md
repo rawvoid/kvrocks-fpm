@@ -43,7 +43,11 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the repository, and installs the fastest compatible package variant:
 
 ```bash
+# Install from Stable channel (default)
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
+
+# Install from Testing channel (pre-releases / release candidates)
+curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo KVROCKS_CHANNEL=testing bash
 ```
 
 *(Note: Upgrades and flavor switches automatically restart the service if running, and preserve the inactive state if stopped.)*
@@ -129,8 +133,11 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
 * **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`).
 * **GitHub CLI (`gh`)**:
   ```bash
-  # Build and publish release (packages + APT & RPM repository deployment)
+  # Build and publish release (stable channel by default)
   gh workflow run release.yaml -f version=2.15.0 -f iteration=1
+
+  # Build and publish release to testing channel
+  gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f channel=testing
 
   # Dry-run / test build only (without creating GitHub release or updating repositories)
   gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f publish_release=false

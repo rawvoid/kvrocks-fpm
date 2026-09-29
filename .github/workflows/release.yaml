@@ -29,6 +29,14 @@ on:
         type: boolean
         required: true
         default: true
+      channel:
+        description: 'Distribution Channel (stable or testing)'
+        type: choice
+        options:
+          - stable
+          - testing
+        required: true
+        default: 'stable'
 
 jobs:
   preflight:
@@ -38,6 +46,7 @@ jobs:
       release_tag: ${{ steps.guard.outputs.release_tag }}
       version: ${{ steps.guard.outputs.version }}
       iteration: ${{ steps.guard.outputs.iteration }}
+      channel: ${{ steps.guard.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,12 +55,14 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_ITERATION: ${{ inputs.iteration }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
           PUBLISH_RELEASE: ${{ inputs.publish_release }}
           IS_DRAFT: ${{ inputs.draft }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${INPUT_VERSION#v}"
           ITERATION="${INPUT_ITERATION}"
+          CHANNEL="${INPUT_CHANNEL:-stable}"
 
           if [ -z "$VERSION" ]; then
             echo "::error::Version must be explicitly provided!"
@@ -68,10 +79,16 @@ jobs:
             exit 1
           fi
 
+          if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "testing" ]; then
+            echo "::error::Channel must be either 'stable' or 'testing'!"
+            exit 1
+          fi
+
           RELEASE_TAG="v${VERSION}-${ITERATION}"
           echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "iteration=${ITERATION}" >> $GITHUB_OUTPUT
+          echo "channel=${CHANNEL}" >> $GITHUB_OUTPUT
 
           # Release Exists Guard: prevent accidental re-releases that poison CDN edge caches
           if [ "$PUBLISH_RELEASE" = "true" ] && [ "$IS_DRAFT" != "true" ]; then
@@ -357,6 +374,7 @@ jobs:
       RELEASE_NAME: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
       VERSION: ${{ needs.preflight.outputs.version }}
       ITERATION: ${{ needs.preflight.outputs.iteration }}
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -473,10 +491,31 @@ jobs:
           fi
 
           # 2. Prepare directory skeleton for metadata publishing (Strict Zero-Binary Guarantee)
-          mkdir -p apt-repo/dists/stable/main/binary-amd64
-          mkdir -p apt-repo/dists/stable/main/binary-arm64
-          mkdir -p apt-repo/rpm/x86_64
-          mkdir -p apt-repo/rpm/aarch64
+          # Preserve existing channel trees from previous deployment (e.g. keep stable when deploying testing)
+          rm -rf apt-repo
+          mkdir -p apt-repo
+          if [ -d existing-pages/dists ]; then
+            cp -r existing-pages/dists apt-repo/
+          fi
+          if [ -d existing-pages/rpm ]; then
+            cp -r existing-pages/rpm apt-repo/
+          fi
+
+          mkdir -p "apt-repo/dists/${CHANNEL}/main/binary-amd64"
+          mkdir -p "apt-repo/dists/${CHANNEL}/main/binary-arm64"
+
+          # Resolve channel-specific RPM output and existing metadata paths
+          RPM_CHANNEL_DIR="apt-repo/rpm"
+          RPM_CHANNEL_REL_PATH="rpm"
+          RPM_EXISTING_PREFIX="existing-pages/rpm"
+          if [ "$CHANNEL" = "testing" ]; then
+            RPM_CHANNEL_DIR="apt-repo/rpm/testing"
+            RPM_CHANNEL_REL_PATH="rpm/testing"
+            RPM_EXISTING_PREFIX="existing-pages/rpm/testing"
+          fi
+
+          mkdir -p "${RPM_CHANNEL_DIR}/x86_64"
+          mkdir -p "${RPM_CHANNEL_DIR}/aarch64"
 
           GPG_KEY_ID="${GPG_KEY_ID:-$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)}"
 
@@ -485,11 +524,11 @@ jobs:
           gpg --batch --yes --armor --export "$GPG_KEY_ID" > apt-repo/kvrocks.asc
           sudo rpm --import apt-repo/kvrocks.asc
 
-          # Copy installer script and generate client repo config
+          # Copy installer script and generate client repo config (including testing channel)
           cp scripts/install.sh apt-repo/install.sh
 
           GATEWAY_URL="${KVROCKS_GATEWAY_URL:-https://kvrocks.kryo.eu.org}"
-          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" > apt-repo/kvrocks.repo
+          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n\n[kvrocks-testing]\nname=Apache Kvrocks Testing Repository\nbaseurl=%s/rpm/testing/$basearch/\nenabled=0\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" > apt-repo/kvrocks.repo
           touch apt-repo/.nojekyll
 
           # Prime gpg-agent in-memory cache via stdin pipeline if needed (avoids writing passphrase to disk)
@@ -522,33 +561,33 @@ jobs:
           for deb_arch in amd64 arm64; do
             (
               cd staging/deb
-              dpkg-scanpackages -m --arch "$deb_arch" pool/main > "${ROOT_DIR}/apt-repo/dists/stable/main/binary-${deb_arch}/Packages.new"
+              dpkg-scanpackages -m --arch "$deb_arch" pool/main > "${ROOT_DIR}/apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
             )
 
-            old_pkg="${ROOT_DIR}/existing-pages/dists/stable/main/binary-${deb_arch}/Packages"
+            old_pkg="${ROOT_DIR}/existing-pages/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
             [ -f "$old_pkg" ] || old_pkg="none"
 
-            echo "=== Merging Debian APT Packages (${deb_arch}) ==="
+            echo "=== Merging Debian APT Packages (${CHANNEL}/${deb_arch}) ==="
             python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$old_pkg" \
-              "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.new" \
-              "apt-repo/dists/stable/main/binary-${deb_arch}/Packages"
-            rm -f "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.new"
+              "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new" \
+              "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
+            rm -f "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
 
             # Compress Packages with both gzip and xz
-            gzip -9c "apt-repo/dists/stable/main/binary-${deb_arch}/Packages" > "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.gz"
-            xz -9c "apt-repo/dists/stable/main/binary-${deb_arch}/Packages" > "apt-repo/dists/stable/main/binary-${deb_arch}/Packages.xz"
+            gzip -9c "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.gz"
+            xz -9c "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "apt-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.xz"
           done
 
           (
-            cd apt-repo/dists/stable
+            cd "apt-repo/dists/${CHANNEL}"
             apt-ftparchive \
               -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
               -o APT::FTPArchive::Release::Label="Kvrocks" \
-              -o APT::FTPArchive::Release::Suite="stable" \
-              -o APT::FTPArchive::Release::Codename="stable" \
+              -o APT::FTPArchive::Release::Suite="${CHANNEL}" \
+              -o APT::FTPArchive::Release::Codename="${CHANNEL}" \
               -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
               -o APT::FTPArchive::Release::Components="main" \
-              -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository" \
+              -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository (${CHANNEL})" \
               release . > Release
 
             # Debian SecureApt standardizes on SHA512
@@ -564,7 +603,7 @@ jobs:
           # 5. Build RPM Metadata (Incremental Merge using mergerepo_c)
           # ==========================================
           for arch in x86_64 aarch64; do
-            echo "=== Generating RPM Metadata for ${arch} ==="
+            echo "=== Generating RPM Metadata for ${CHANNEL}/${arch} ==="
             if ! ls "staging/rpm/${arch}/"*.rpm >/dev/null 2>&1; then
               echo "::error::No RPM packages found in staging/rpm/${arch}/!"
               exit 1
@@ -572,27 +611,27 @@ jobs:
 
             createrepo_c "staging/rpm/${arch}/"
 
-            if [ -d "existing-pages/rpm/${arch}/repodata" ]; then
-              echo "Merging RPM repository metadata for ${arch}..."
+            if [ -d "${RPM_EXISTING_PREFIX}/${arch}/repodata" ]; then
+              echo "Merging RPM repository metadata for ${CHANNEL}/${arch}..."
               mergerepo_c --all \
-                --repo "existing-pages/rpm/${arch}/" \
+                --repo "${RPM_EXISTING_PREFIX}/${arch}/" \
                 --repo "staging/rpm/${arch}/" \
-                -o "apt-repo/rpm/${arch}/"
+                -o "${RPM_CHANNEL_DIR}/${arch}/"
             else
-              echo "Initializing new RPM repository metadata for ${arch}..."
-              mkdir -p "apt-repo/rpm/${arch}"
-              cp -r "staging/rpm/${arch}/repodata" "apt-repo/rpm/${arch}/"
+              echo "Initializing new RPM repository metadata for ${CHANNEL}/${arch}..."
+              mkdir -p "${RPM_CHANNEL_DIR}/${arch}"
+              cp -r "staging/rpm/${arch}/repodata" "${RPM_CHANNEL_DIR}/${arch}/"
             fi
 
-            if [ ! -f "apt-repo/rpm/${arch}/repodata/repomd.xml" ]; then
-              echo "::error::RPM repomd.xml was not generated for ${arch}!"
+            if [ ! -f "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml" ]; then
+              echo "::error::RPM repomd.xml was not generated for ${CHANNEL}/${arch}!"
               exit 1
             fi
 
             # RPM detached GPG signature
             gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor \
-              -o "apt-repo/rpm/${arch}/repodata/repomd.xml.asc" "apt-repo/rpm/${arch}/repodata/repomd.xml"
-            gpg --verify "apt-repo/rpm/${arch}/repodata/repomd.xml.asc" "apt-repo/rpm/${arch}/repodata/repomd.xml"
+              -o "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml.asc" "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml"
+            gpg --verify "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml.asc" "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml"
           done
           rm -rf staging existing-pages
 
@@ -611,13 +650,14 @@ jobs:
           TOTAL_PAGES_KB=$(du -sk apt-repo | cut -f1)
           echo "Total metadata repository footprint: ${TOTAL_PAGES_KB} KB"
 
-          echo "### Dual APT & RPM Metadata Repositories Generated" >> $GITHUB_STEP_SUMMARY
+          echo "### Dual APT & RPM Metadata Repositories Generated (${CHANNEL})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Channel**: \`${CHANNEL}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Edge Gateway Endpoint**: \`${GATEWAY_URL}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **APT Repository (via Gateway)**: \`${GATEWAY_URL} stable main\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/rpm/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **APT Repository (via Gateway)**: \`${GATEWAY_URL} ${CHANNEL} main\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/${RPM_CHANNEL_REL_PATH}/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
           echo "- **YUM / DNF Repo Config**: \`${GATEWAY_URL}/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
           echo "- **GPG Public Key (ASCII)**: \`${GATEWAY_URL}/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, multi-version retention enabled)" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, multi-channel retention enabled)" >> $GITHUB_STEP_SUMMARY
           echo "- **Binary Asset Storage**: Hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) & stream-cached at Cloudflare Edge." >> $GITHUB_STEP_SUMMARY
 
       - name: Deploy Repositories to GitHub Pages
