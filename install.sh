@@ -128,15 +128,14 @@ is_rhel_derivative() {
 }
 
 main() {
-    REPO_URL="$(resolve_repo_url)"
-    CHANNEL="${KVROCKS_CHANNEL:-stable}"
-    if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "testing" ]; then
-        error "Unsupported KVROCKS_CHANNEL '${CHANNEL}'. Must be 'stable' or 'testing'."
-    fi
-
     # 1. Require root privileges
     if [ "$(id -u)" -ne 0 ]; then
         error "This script must be run as root."
+    fi
+
+    CHANNEL="${KVROCKS_CHANNEL:-stable}"
+    if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "testing" ]; then
+        error "Unsupported KVROCKS_CHANNEL '${CHANNEL}'. Must be 'stable' or 'testing'."
     fi
 
     printf '%b' "${CYAN}${BOLD}"
@@ -150,6 +149,8 @@ main() {
       Apache Kvrocks Automated Installer
 EOF
     printf '%b\n' "${NC}"
+
+    REPO_URL="$(resolve_repo_url)"
 
     # 2. Check OS distribution
     if [ -f /etc/os-release ]; then
@@ -359,9 +360,7 @@ EOF
         if INSTALLED_VER="$("$KVROCKS_BIN" --version 2>&1)" || INSTALLED_VER="$("$KVROCKS_BIN" -v 2>&1)"; then
             success "Kvrocks successfully installed: ${INSTALLED_VER}"
         else
-            error "Kvrocks package was installed, but binary failed to execute!
-Dynamic linker or runtime dependency error:
-${INSTALLED_VER}"
+            error "Kvrocks package was installed, but binary failed to execute! Dynamic linker or runtime dependency error: ${INSTALLED_VER}"
         fi
     else
         error "Package installation command completed, but kvrocks binary was not found in /usr/bin/ or PATH."
@@ -369,16 +368,16 @@ ${INSTALLED_VER}"
 
     printf '\n%b%b=== Getting Started with Apache Kvrocks ===%b\n' "${GREEN}" "${BOLD}" "${NC}"
     if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-        printf '  • Start service:   %b\n' "${CYAN}sudo systemctl start kvrocks${NC}"
-        printf '  • Enable autostart:%b\n' "${CYAN}sudo systemctl enable kvrocks${NC}"
-        printf '  • Check status:    %b\n' "${CYAN}sudo systemctl status kvrocks${NC}"
-        printf '  • View logs:       %b\n' "${CYAN}sudo journalctl -u kvrocks -f${NC}"
+        printf '  • %-18s %b\n' "Start service:" "${CYAN}sudo systemctl start kvrocks${NC}"
+        printf '  • %-18s %b\n' "Enable autostart:" "${CYAN}sudo systemctl enable kvrocks${NC}"
+        printf '  • %-18s %b\n' "Check status:" "${CYAN}sudo systemctl status kvrocks${NC}"
+        printf '  • %-18s %b\n' "View logs:" "${CYAN}sudo journalctl -u kvrocks -f${NC}"
     else
-        printf '  • Start service:   %b\n' "${CYAN}kvrocks -c /etc/kvrocks/kvrocks.conf${NC}"
-        printf '  • View logs:       %b\n' "${CYAN}tail -f /var/log/kvrocks/kvrocks_*.log${NC}"
+        printf '  • %-18s %b\n' "Start service:" "${CYAN}kvrocks -c /etc/kvrocks/kvrocks.conf${NC}"
+        printf '  • %-18s %b\n' "View logs:" "${CYAN}tail -f /var/log/kvrocks/kvrocks_*.log${NC}"
     fi
-    printf '  • Connect:         %b\n' "${CYAN}redis-cli -p 6666 ping${NC}"
-    printf '  • Configuration:   %b\n\n' "${CYAN}/etc/kvrocks/kvrocks.conf${NC}"
+    printf '  • %-18s %b\n' "Connect:" "${CYAN}redis-cli -p 6666 ping${NC}"
+    printf '  • %-18s %b\n\n' "Configuration:" "${CYAN}/etc/kvrocks/kvrocks.conf${NC}"
 }
 
 main "$@"
