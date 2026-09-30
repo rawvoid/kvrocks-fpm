@@ -49,7 +49,7 @@ Cloudflare Worker edge gateway that powers the official Apache Kvrocks APT (`deb
 4. Click **Deploy**, then click **Edit code**.
 5. Replace editor contents with `worker.js`.
 6. Click **Deploy**.
-7. Go to **Settings > Domains & Routes > Add > Custom Domain** and bind your domain (e.g. `kvrocks.kryo.eu.org`).
+7. Go to **Settings > Domains & Routes > Add > Custom Domain** and bind your custom gateway domain.
 
 ---
 

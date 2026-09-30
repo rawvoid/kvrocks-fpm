@@ -10,7 +10,7 @@
  *    - Supports HEAD requests and optional ?redirect=1 for direct HTTP 302 redirects.
  *
  * 2. Repository Metadata & Assets (InRelease, repomd.xml, *.repo, *.asc, install.sh):
- *    - Proxies directly from GitHub Pages (rawvoid.github.io/kvrocks-fpm).
+ *    - Proxies directly from GitHub Pages (configured via METADATA_ORIGIN).
  *    - Applies intelligent edge caching (5 minutes for index, 24 hours for GPG keys).
  *    - Adds permissive CORS headers.
  *

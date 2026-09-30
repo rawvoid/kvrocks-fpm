@@ -6,7 +6,3 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 GITHUB_REPO = "rawvoid/kvrocks-fpm"
 METADATA_ORIGIN = "https://rawvoid.github.io/kvrocks-fpm"
-
-routes = [
-  { pattern = "kvrocks.kryo.eu.org/*", custom_domain = true }
-]
