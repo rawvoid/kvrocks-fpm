@@ -69,6 +69,40 @@ fetch_file() {
     trap - EXIT
 }
 
+fetch_text() {
+    local url="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url" 2>/dev/null || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$url" 2>/dev/null || true
+    else
+        error "Neither curl nor wget is available. Please install curl or wget."
+    fi
+}
+
+resolve_repo_url() {
+    # 1. Allow explicit environment variable override
+    if [ -n "${KVROCKS_REPO_URL:-}" ]; then
+        echo "${KVROCKS_REPO_URL%/}"
+        return 0
+    fi
+
+    # 2. Dynamically resolve from authoritative kvrocks.repo
+    local repo_cfg_url="https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo"
+    local content
+    content="$(fetch_text "$repo_cfg_url")"
+
+    local resolved_url
+    resolved_url="$(echo "$content" | grep -m1 '^baseurl=' | sed -E 's|^baseurl=(https?://[^/]+).*|\1|' || true)"
+
+    # 3. Explicit error if resolution failed (strictly no hardcoded fallback)
+    if [ -z "$resolved_url" ]; then
+        error "Failed to resolve repository URL from ${repo_cfg_url}. Please check your network connection or specify KVROCKS_REPO_URL."
+    fi
+
+    echo "${resolved_url%/}"
+}
+
 is_debian_derivative() {
     case "$OS_ID" in
         debian|ubuntu|linuxmint|pop|raspbian|kali|elementary|zorin) return 0 ;;
@@ -94,8 +128,7 @@ is_rhel_derivative() {
 }
 
 main() {
-    REPO_URL="${KVROCKS_REPO_URL:-https://kvrocks.kryo.eu.org}"
-    REPO_URL="${REPO_URL%/}"
+    REPO_URL="$(resolve_repo_url)"
     CHANNEL="${KVROCKS_CHANNEL:-stable}"
     if [ "$CHANNEL" != "stable" ] && [ "$CHANNEL" != "testing" ]; then
         error "Unsupported KVROCKS_CHANNEL '${CHANNEL}'. Must be 'stable' or 'testing'."
