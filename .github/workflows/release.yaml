@@ -1,17 +1,23 @@
 name: Release Packages
 
-concurrency:
-  group: pages-repository-deployment
-  cancel-in-progress: false
-
 permissions:
   contents: read
+
+env:
+  # fpm is pinned for reproducible packages (setup-fpm actions provision the unrelated Fortran Package Manager)
+  FPM_VERSION: "1.18.0"
+  GH_REPO: ${{ github.repository }}
+
+# `shell: bash` (unlike the implicit `bash -e`) also enables `pipefail`.
+defaults:
+  run:
+    shell: bash
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Apache Kvrocks version to build (e.g. 2.15.0)'
+        description: 'Apache Kvrocks version to build (e.g. 2.15.0 or 2.15.0-rc1)'
         type: string
         required: true
       iteration:
@@ -19,91 +25,93 @@ on:
         type: string
         required: true
         default: '1'
-      draft:
-        description: 'Create as Draft Release (do not publish to GitHub Pages)'
+      dry_run:
+        description: 'Dry run: build and verify the packages only, publish nothing'
         type: boolean
-        required: true
         default: false
-      publish_release:
-        description: 'Publish release to GitHub Releases'
-        type: boolean
-        required: true
-        default: true
 
 jobs:
   preflight:
-    name: Preflight & Release Guard
+    name: Preflight
     runs-on: ubuntu-latest
+    # Draft releases are only visible to tokens with write access.
+    permissions:
+      contents: write
     outputs:
-      release_tag: ${{ steps.guard.outputs.release_tag }}
-      version: ${{ steps.guard.outputs.version }}
-      iteration: ${{ steps.guard.outputs.iteration }}
-      channel: ${{ steps.guard.outputs.channel }}
-      is_prerelease: ${{ steps.guard.outputs.is_prerelease }}
+      version: ${{ steps.resolve.outputs.version }}
+      pkg_version: ${{ steps.resolve.outputs.pkg_version }}
+      iteration: ${{ steps.resolve.outputs.iteration }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate Inputs & Release Guard
-        id: guard
+      # Version resolution:
+      #   version       upstream version, release tag (v<version>-<iteration>), asset filenames (2.15.0-rc1)
+      #   pkg_version   internal DEB/RPM version, `~` sorts pre-releases below GA in APT/DNF (2.15.0~rc1)
+      # The gateway derives the release tag (v<version>-<iteration>) from the package file name.
+      - name: Resolve Version & Channel
+        id: resolve
         env:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_ITERATION: ${{ inputs.iteration }}
-          PUBLISH_RELEASE: ${{ inputs.publish_release }}
-          IS_DRAFT: ${{ inputs.draft }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${INPUT_VERSION#v}"
-          ITERATION="${INPUT_ITERATION}"
+          version="${INPUT_VERSION#v}"
+          iteration="$INPUT_ITERATION"
 
-          if [ -z "$VERSION" ]; then
-            echo "::error::Version must be explicitly provided!"
+          if [[ ! "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
+            echo "::error::Version must look like 2.15.0 or 2.15.0-rc1, got '${version}'"
+            exit 1
+          fi
+          if [[ ! "$iteration" =~ ^[0-9]+$ ]]; then
+            echo "::error::Iteration must be a positive integer, got '${iteration}'"
             exit 1
           fi
 
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::Version must match semantic versioning format (e.g. 2.15.0 or 2.15.0-rc1)!"
-            exit 1
-          fi
-
-          if ! echo "$ITERATION" | grep -Eq '^[0-9A-Za-z.+~]+$'; then
-            echo "::error::Iteration must be a valid package revision token (e.g. 1)!"
-            exit 1
-          fi
-
-          # Automatically deduce distribution channel and prerelease flag from version semantics
-          if echo "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
-            CHANNEL="stable"
-            IS_PRERELEASE="false"
+          core="${BASH_REMATCH[1]}"
+          prerelease="${BASH_REMATCH[3]}"
+          if [ -n "$prerelease" ]; then
+            channel=testing
+            pkg_version="${core}~${prerelease}"
           else
-            CHANNEL="testing"
-            IS_PRERELEASE="true"
+            channel=stable
+            pkg_version="$core"
           fi
 
-          RELEASE_TAG="v${VERSION}-${ITERATION}"
-          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "iteration=${ITERATION}" >> $GITHUB_OUTPUT
-          echo "channel=${CHANNEL}" >> $GITHUB_OUTPUT
-          echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
+          {
+            echo "version=${version}"
+            echo "pkg_version=${pkg_version}"
+            echo "iteration=${iteration}"
+            echo "channel=${channel}"
+            echo "release_tag=v${version}-${iteration}"
+          } >> "$GITHUB_OUTPUT"
 
-          # Release Exists Guard: prevent accidental re-releases that poison CDN edge caches
-          if [ "$PUBLISH_RELEASE" = "true" ] && [ "$IS_DRAFT" != "true" ]; then
-            RELEASE_EXISTS=false
-            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              RELEASE_EXISTS=true
-            elif git ls-remote --tags --exit-code origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-              RELEASE_EXISTS=true
-            fi
+      - name: Check Publishing Preconditions
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
+          GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          : "${GATEWAY_URL:?Repository variable KVROCKS_GATEWAY_URL must be set}"
+          : "${GPG_PRIVATE_KEY:?Secret GPG_PRIVATE_KEY must be set}"
 
-            if [ "$RELEASE_EXISTS" = "true" ]; then
-              echo "::error title=Release Already Exists::Release ${RELEASE_TAG} already exists on GitHub Releases or remote git tags!"
-              echo "::error::Re-releasing the same version-iteration causes fatal CDN 'Hash Sum mismatch' errors on client machines."
-              echo "::error::Please bump iteration (e.g. iteration=2) instead."
-              exit 1
-            fi
+          # Re-releasing a published version-iteration poisons CDN caches and client APT/DNF state.
+          # A leftover draft from a failed run is also rejected: delete it before retrying.
+          if release=$(gh release view "$RELEASE_TAG" 2>&1); then
+            echo "::error::Release ${RELEASE_TAG} already exists (published or draft). Bump the iteration or delete the stale draft."
+            exit 1
+          elif [[ "$release" != *"release not found"* ]]; then
+            echo "::error::Could not query release ${RELEASE_TAG}: ${release}"
+            exit 1
           fi
 
-          echo "Preflight validation passed: Target Release ${RELEASE_TAG}"
+          tag=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")
+          if [ -n "$tag" ]; then
+            echo "::error::Git tag ${RELEASE_TAG} already exists. Bump the iteration."
+            exit 1
+          fi
 
   test:
     name: Pre-Release Quality Gate
@@ -116,7 +124,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ needs.preflight.outputs.version }}
+      PKG_VERSION: ${{ needs.preflight.outputs.pkg_version }}
       ITERATION: ${{ needs.preflight.outputs.iteration }}
+      PKG_NAME: kvrocks${{ matrix.pkg_suffix }}
+      DEB_ARCH: ${{ matrix.arch }}
+      RPM_ARCH: ${{ matrix.rpm_arch }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     strategy:
       fail-fast: false
       matrix:
@@ -158,512 +171,412 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y git build-essential cmake libtool python3 \
-                                  ruby-full ruby-dev rpm libssl-dev ccache binutils
-          sudo gem install --no-document fpm
+                                  ruby ruby-dev rpm libssl-dev ccache binutils
+          sudo gem install --no-document fpm -v "$FPM_VERSION"
 
-      - name: Setup ccache
+      - name: Restore ccache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ccache
-          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ github.sha }}
+          path: .ccache
+          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}
           restore-keys: |
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
 
       - name: Build Kvrocks
+        env:
+          # -g emits DWARF symbols that are split into the debuginfo archive afterwards
+          CFLAGS: -g ${{ matrix.extra_flags }}
+          CXXFLAGS: -g ${{ matrix.extra_flags }}
+          CCACHE_MAXSIZE: 2G
         run: |
-          export PATH="/usr/lib/ccache:$PATH"
-          export CCACHE_DIR="$HOME/.cache/ccache"
-          export CCACHE_MAXSIZE="2G"
-          export LDFLAGS="-static-libstdc++ -static-libgcc $LDFLAGS"
-          # Inject -g to generate comprehensive DWARF debug symbols alongside -O3 optimizations
-          export CFLAGS="-g ${{ matrix.extra_flags }}"
-          export CXXFLAGS="-g ${{ matrix.extra_flags }}"
           ccache -z
-
-          git clone --depth 1 -b v${{ env.VERSION }} https://github.com/apache/kvrocks.git
+          git clone --depth 1 --branch "v${VERSION}" https://github.com/apache/kvrocks.git
           cd kvrocks
-          ./x.py build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" -DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON -j $(nproc)
-          
+          ./x.py build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" \
+            -DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON \
+            -j "$(nproc)"
           ccache -s
 
-      - name: Inspect Binary Linkage & Compatibility
+      - name: Verify Binary Portability
+        env:
+          # Must match the glibc requirement enforced by scripts/install.sh
+          MAX_GLIBC_ALLOWED: "2.35"
         run: |
-          echo "=== Dynamic library dependencies (ldd) ==="
-          ldd kvrocks/build/kvrocks || true
-          
-          echo "=== Check libstdc++ linkage ==="
-          if ldd kvrocks/build/kvrocks | grep -q "libstdc++"; then
-            echo "::warning::libstdc++ is dynamically linked!"
-          else
-            echo "Verified: libstdc++ is statically linked."
+          binary=kvrocks/build/kvrocks
+
+          needed=$(readelf -d "$binary" | grep NEEDED)
+          echo "=== Shared library dependencies ==="
+          echo "$needed"
+          if grep -qF 'libstdc++' <<<"$needed"; then
+            echo "::error::libstdc++ is dynamically linked, the binary is not portable!"
+            exit 1
           fi
 
-          echo "=== Glibc symbols required by kvrocks ==="
-          objdump -T kvrocks/build/kvrocks | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu > "glibc-symbols-${{ matrix.arch }}-${{ matrix.cpu_target }}.txt" || true
-          MAX_GLIBC=$(tail -n 1 "glibc-symbols-${{ matrix.arch }}-${{ matrix.cpu_target }}.txt" 2>/dev/null || echo "unknown")
-          echo "Max GLIBC symbol required: ${MAX_GLIBC}"
-          cat "glibc-symbols-${{ matrix.arch }}-${{ matrix.cpu_target }}.txt" || true
-          echo "### Binary Compatibility (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
-          echo "- Highest GLIBC symbol required: \`${MAX_GLIBC}\`" >> $GITHUB_STEP_SUMMARY
+          max_glibc=$(objdump -T "$binary" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)
+          max_glibc="${max_glibc#GLIBC_}"
+          echo "Highest GLIBC symbol required: ${max_glibc}"
+          if [ "$(printf '%s\n' "$max_glibc" "$MAX_GLIBC_ALLOWED" | sort -V | tail -n 1)" != "$MAX_GLIBC_ALLOWED" ]; then
+            echo "::error::Binary requires glibc ${max_glibc}, but packages promise compatibility with glibc >= ${MAX_GLIBC_ALLOWED}!"
+            exit 1
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Binary Portability (${DEB_ARCH}, ${{ matrix.cpu_target }})
+          - Highest GLIBC symbol required: \`${max_glibc}\` (limit \`${MAX_GLIBC_ALLOWED}\`)
+          - libstdc++ statically linked
+          EOF
 
       - name: Separate Debug Symbols & Strip Binaries
         run: |
-          DEBUGINFO_NAME="kvrocks${{ matrix.pkg_suffix }}-debuginfo_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.tar.gz"
-          echo "DEBUGINFO_NAME=${DEBUGINFO_NAME}" >> $GITHUB_ENV
+          mkdir dist
+          debuginfo="dist/${PKG_NAME}-debuginfo_${VERSION}-${ITERATION}_${DEB_ARCH}.tar.gz"
 
-          echo "=== Extracting detached debug symbols, stripping, and embedding debuglink ==="
           for bin in kvrocks kvrocks2redis; do
-            objcopy --only-keep-debug "kvrocks/build/${bin}" "kvrocks/build/${bin}.debug"
-            chmod 0644 "kvrocks/build/${bin}.debug"
-            strip --strip-unneeded "kvrocks/build/${bin}"
-            objcopy --add-gnu-debuglink="kvrocks/build/${bin}.debug" "kvrocks/build/${bin}"
+            path="kvrocks/build/${bin}"
+            objcopy --only-keep-debug "$path" "${path}.debug"
+            chmod 0644 "${path}.debug"
+            strip --strip-unneeded "$path"
+            objcopy --add-gnu-debuglink="${path}.debug" "$path"
+
+            # The debug file must carry DWARF data and match the stripped binary's GNU Build ID
+            if ! readelf -S "${path}.debug" | grep '\.debug_info' >/dev/null; then
+              echo "::error::${bin}.debug has no .debug_info, DWARF generation failed!"
+              exit 1
+            fi
+            bin_id=$(readelf -n "$path" | awk '/Build ID:/{print $3}')
+            debug_id=$(readelf -n "${path}.debug" | awk '/Build ID:/{print $3}')
+            if [ -z "$bin_id" ] || [ "$bin_id" != "$debug_id" ]; then
+              echo "::error::Build ID mismatch for ${bin}: binary '${bin_id}' != debug '${debug_id}'"
+              exit 1
+            fi
+            echo "${bin}: Build ID ${bin_id}"
           done
 
-          echo "=== Quality Gate: Verifying Debug Symbols & Build IDs ==="
-          # 1. Verify DWARF debug sections exist
-          if ! readelf -S kvrocks/build/kvrocks.debug 2>/dev/null | grep -q '\.debug_info'; then
-            echo "::error::kvrocks.debug does not contain .debug_info! DWARF symbol generation failed."
-            exit 1
-          fi
-          echo "Verified: kvrocks.debug contains valid DWARF debug sections."
-
-          # 2. Verify binary and detached debuginfo share the exact same GNU Build ID
-          KV_BIN_ID=$(readelf -n kvrocks/build/kvrocks | awk '/Build ID:/{print $3}')
-          KV_DBG_ID=$(readelf -n kvrocks/build/kvrocks.debug 2>/dev/null | awk '/Build ID:/{print $3}')
-          echo "Kvrocks GNU Build ID: ${KV_BIN_ID}"
-          if [ -z "$KV_BIN_ID" ] || [ "$KV_BIN_ID" != "$KV_DBG_ID" ]; then
-            echo "::error::Build ID mismatch! Binary (${KV_BIN_ID}) != Debug (${KV_DBG_ID})"
-            exit 1
-          fi
-          echo "Verified: GNU Build IDs match perfectly."
-
-          echo "=== Archiving debug symbols ==="
-          tar -czf "${DEBUGINFO_NAME}" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
-          ls -lh "${DEBUGINFO_NAME}" kvrocks/build/kvrocks kvrocks/build/kvrocks2redis
-
-          echo "### Binary Stripping & Detached Debuginfo (${{ matrix.arch }}-${{ matrix.cpu_target }})" >> $GITHUB_STEP_SUMMARY
-          echo "- GNU Build ID: \`${KV_BIN_ID}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Stripped binary size: \`$(du -h kvrocks/build/kvrocks | cut -f1)\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Detached debug archive: \`${DEBUGINFO_NAME}\` (\`$(du -h ${DEBUGINFO_NAME} | cut -f1)\`)" >> $GITHUB_STEP_SUMMARY
+          tar -czf "$debuginfo" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
+          ls -lh "$debuginfo" kvrocks/build/kvrocks kvrocks/build/kvrocks2redis
 
       - name: Prepare Packaging RootFS
         run: |
-          mkdir -p rootfs/usr/bin
-          mkdir -p rootfs/etc/kvrocks
-          mkdir -p rootfs/usr/share/doc/kvrocks
-          mkdir -p rootfs/usr/lib/systemd/system
+          mkdir -p rootfs/usr/bin rootfs/etc/kvrocks rootfs/usr/share/doc/kvrocks rootfs/usr/lib/systemd/system
 
-          # Binaries
-          cp kvrocks/build/kvrocks rootfs/usr/bin/
-          cp kvrocks/build/kvrocks2redis rootfs/usr/bin/
+          cp kvrocks/build/kvrocks kvrocks/build/kvrocks2redis rootfs/usr/bin/
 
           # Configuration with FHS paths and native log retention
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
           python3 packaging/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
 
-          # License, Notice & Pristine Upstream Configuration References
+          # License, notice and pristine upstream configuration references
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
           cp kvrocks/kvrocks.conf rootfs/usr/share/doc/kvrocks/kvrocks.conf.default
-          if [ -f kvrocks/utils/kvrocks2redis/kvrocks2redis.conf ]; then
-            cp kvrocks/utils/kvrocks2redis/kvrocks2redis.conf rootfs/usr/share/doc/kvrocks/kvrocks2redis.conf.default
-          elif [ -f kvrocks/kvrocks2redis.conf ]; then
-            cp kvrocks/kvrocks2redis.conf rootfs/usr/share/doc/kvrocks/kvrocks2redis.conf.default
-          fi
+          cp kvrocks/utils/kvrocks2redis/kvrocks2redis.conf rootfs/usr/share/doc/kvrocks/kvrocks2redis.conf.default
 
-          # Systemd service unit (unified standard path /usr/lib/systemd/system)
           cp packaging/systemd/kvrocks.service rootfs/usr/lib/systemd/system/
 
-          # Display colored unified diff in a collapsible group
-          echo "::group::View Configuration Diff (Upstream vs Patched)"
-          diff -u --color=always rootfs/usr/share/doc/kvrocks/kvrocks.conf.default rootfs/etc/kvrocks/kvrocks.conf || true
+          echo "::group::Configuration Diff (Upstream vs Patched)"
+          # diff exits with 1 when the files differ, which is expected here
+          diff -u --color=always rootfs/usr/share/doc/kvrocks/kvrocks.conf.default rootfs/etc/kvrocks/kvrocks.conf || [ $? -eq 1 ]
           echo "::endgroup::"
 
-      - name: Validate Patched Configuration (Dry-Run)
+      - name: Validate Patched Configuration
         run: |
-          mkdir -p /tmp/kvrocks-dryrun/data /tmp/kvrocks-dryrun/log
+          workdir=$(mktemp -d)
+          mkdir "$workdir/data" "$workdir/log"
           kvrocks/build/kvrocks -c rootfs/etc/kvrocks/kvrocks.conf \
-            --bind 127.0.0.1 \
-            --port 56789 \
-            --dir /tmp/kvrocks-dryrun/data \
-            --log-dir /tmp/kvrocks-dryrun/log \
+            --bind 127.0.0.1 --port 56789 \
+            --dir "$workdir/data" --log-dir "$workdir/log" \
             --daemonize no &
-          KV_PID=$!
-          sleep 1
-          if kill -0 $KV_PID 2>/dev/null; then
-            echo "Kvrocks configuration successfully validated against built binary."
-            kill -TERM $KV_PID
-            wait $KV_PID 2>/dev/null || true
-            rm -rf /tmp/kvrocks-dryrun
-          else
-            wait $KV_PID
-            EXIT_CODE=$?
-            echo "::error::Kvrocks failed to parse patched configuration! Exit code: $EXIT_CODE"
-            rm -rf /tmp/kvrocks-dryrun
+          pid=$!
+          # The server is either already gone (failed start) or still serving when the step ends
+          trap 'kill "$pid" 2>/dev/null || true; rm -rf "$workdir"' EXIT
+
+          for _ in $(seq 30); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              status=0
+              wait "$pid" || status=$?
+              echo "::error::Kvrocks exited with status ${status} while loading the patched configuration"
+              cat "$workdir"/log/* 2>/dev/null || true
+              exit 1
+            fi
+            if (exec 3<>/dev/tcp/127.0.0.1/56789) 2>/dev/null; then
+              echo "Kvrocks started and accepts connections with the patched configuration."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Kvrocks did not accept connections within 30s"
+          exit 1
+
+      - name: Package DEB & RPM
+        env:
+          DEB_EXTRA_ARGS: ${{ matrix.deb_extra_args }}
+          RPM_EXTRA_ARGS: ${{ matrix.rpm_extra_args }}
+        run: |
+          read -ra deb_extra <<<"$DEB_EXTRA_ARGS"
+          read -ra rpm_extra <<<"$RPM_EXTRA_ARGS"
+
+          common=(
+            -s dir -C rootfs
+            -n "$PKG_NAME" -v "$PKG_VERSION" --iteration "$ITERATION"
+            --category database
+            --vendor "Rawvoid"
+            --maintainer "Rawvoid <rawvoid@users.noreply.github.com>"
+            --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol'
+            --url 'https://kvrocks.apache.org'
+            --license 'Apache-2.0'
+            --config-files /etc/kvrocks/kvrocks.conf
+            --before-remove packaging/hooks/prerm.sh
+            --after-install packaging/hooks/postinst.sh
+            --after-remove packaging/hooks/postrm.sh
+          )
+
+          fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
+            -d libssl3 \
+            --deb-user root --deb-group root \
+            "${deb_extra[@]}" \
+            -p "dist/${PKG_NAME}_${VERSION}-${ITERATION}_${DEB_ARCH}.deb"
+
+          fpm "${common[@]}" -t rpm -a "$RPM_ARCH" \
+            -d 'libssl.so.3()(64bit)' \
+            --rpm-digest sha256 \
+            --rpm-user root --rpm-group root \
+            --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
+            "${rpm_extra[@]}" \
+            -p "dist/${PKG_NAME}-${VERSION}-${ITERATION}.${RPM_ARCH}.rpm"
+
+      - name: Verify Package Metadata
+        run: |
+          deb="dist/${PKG_NAME}_${VERSION}-${ITERATION}_${DEB_ARCH}.deb"
+          rpm="dist/${PKG_NAME}-${VERSION}-${ITERATION}.${RPM_ARCH}.rpm"
+          expected="${PKG_VERSION}-${ITERATION}"
+
+          dpkg-deb --info "$deb"
+          rpm -qp --info --provides --conflicts --obsoletes "$rpm"
+
+          deb_version=$(dpkg-deb --field "$deb" Version)
+          rpm_version=$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$rpm")
+          if [ "$deb_version" != "$expected" ] || [ "$rpm_version" != "$expected" ]; then
+            echo "::error::Package version mismatch: expected '${expected}', DEB '${deb_version}', RPM '${rpm_version}'"
             exit 1
           fi
-
-      - name: Package DEB
-        run: |
-          fpm -s dir -t deb \
-            -n "kvrocks${{ matrix.pkg_suffix }}" \
-            -v "${{ env.VERSION }}" \
-            --iteration "${{ env.ITERATION }}" \
-            -a "${{ matrix.arch }}" \
-            -d "libssl3" \
-            --category "database" \
-            --vendor "Rawvoid" \
-            --maintainer "Rawvoid <rawvoid@users.noreply.github.com>" \
-            --deb-user root \
-            --deb-group root \
-            -C rootfs \
-            --config-files /etc/kvrocks/kvrocks.conf \
-            --before-remove packaging/hooks/prerm.sh \
-            --after-install packaging/hooks/postinst.sh \
-            --after-remove packaging/hooks/postrm.sh \
-            --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
-            --url 'https://kvrocks.apache.org' \
-            --license 'Apache-2.0' \
-            ${{ matrix.deb_extra_args }} \
-            -p "kvrocks${{ matrix.pkg_suffix }}_${{ env.VERSION }}-${{ env.ITERATION }}_${{ matrix.arch }}.deb"
-
-      - name: Package RPM
-        run: |
-          fpm -s dir -t rpm \
-            -n "kvrocks${{ matrix.pkg_suffix }}" \
-            -v "${{ env.VERSION }}" \
-            --iteration "${{ env.ITERATION }}" \
-            -a "${{ matrix.rpm_arch }}" \
-            -d "libssl.so.3()(64bit)" \
-            --rpm-digest sha256 \
-            --category "database" \
-            --vendor "Rawvoid" \
-            --maintainer "Rawvoid <rawvoid@users.noreply.github.com>" \
-            --rpm-user root \
-            --rpm-group root \
-            -C rootfs \
-            --config-files /etc/kvrocks/kvrocks.conf \
-            --before-remove packaging/hooks/prerm.sh \
-            --after-install packaging/hooks/postinst.sh \
-            --after-remove packaging/hooks/postrm.sh \
-            --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
-            --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol' \
-            --url 'https://kvrocks.apache.org' \
-            --license 'Apache-2.0' \
-            ${{ matrix.rpm_extra_args }} \
-            -p "kvrocks${{ matrix.pkg_suffix }}-${{ env.VERSION }}-${{ env.ITERATION }}.${{ matrix.rpm_arch }}.rpm"
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.arch }}-${{ matrix.cpu_target }}
-          path: |
-            *.deb
-            *.rpm
-            *.tar.gz
-            glibc-symbols-*.txt
+          path: dist/
           if-no-files-found: error
 
-  publish-release:
-    name: Publish GitHub Release & Repositories
+  publish:
+    name: Publish Release & Repositories
     needs: [preflight, build-and-package]
-    if: inputs.publish_release == true || inputs.publish_release == 'true'
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # Serialize all gh-pages writers (this job and pages.yaml)
+    concurrency:
+      group: pages-repository-deployment
+      cancel-in-progress: false
     env:
+      GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
-      RELEASE_NAME: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
-      VERSION: ${{ needs.preflight.outputs.version }}
-      ITERATION: ${{ needs.preflight.outputs.iteration }}
       CHANNEL: ${{ needs.preflight.outputs.channel }}
-      IS_PRERELEASE: ${{ needs.preflight.outputs.is_prerelease }}
+      GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      # The gh-pages branch must already exist; it is only ever appended to, never rebuilt.
+      - name: Checkout GitHub Pages Branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+
+      - name: Download Build Artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Setup GPG & Sign RPM Packages
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          if [ -z "$GPG_PRIVATE_KEY" ]; then
-            echo "::error::GPG_PRIVATE_KEY secret is not set! Repository and package signing cannot proceed."
-            exit 1
-          fi
-
-          sudo apt-get update
-          sudo apt-get install -y rpm gnupg
-
-          mkdir -p ~/.gnupg
-          chmod 700 ~/.gnupg
-          printf 'allow-loopback-pinentry\ndefault-cache-ttl 3600\nmax-cache-ttl 7200\n' > ~/.gnupg/gpg-agent.conf
-          echo "pinentry-mode loopback" > ~/.gnupg/gpg.conf
-          gpg-connect-agent reloadagent /bye 2>/dev/null || true
-
-          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-          GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)
-          echo "Loaded GPG signing key: $GPG_KEY_ID"
-          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
-
-          # Prime gpg-agent in-memory cache via stdin pipeline (avoids writing passphrase to disk)
-          if [ -n "$GPG_PASSPHRASE" ]; then
-            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -u "$GPG_KEY_ID" -sbo /dev/null /dev/null
-          fi
-
-          trap 'rm -f /tmp/kvrocks-signing-key.asc' EXIT
-
-          # Configure RPM macros for package signing (gpg-agent daemon handles passphrase in-memory)
-          printf '%%_signature gpg\n%%_gpg_name %s\n%%_gpg_path %s/.gnupg\n%%_gpg_digest_algo sha256\n%%__gpg /usr/bin/gpg\n' "$GPG_KEY_ID" "$HOME" > ~/.rpmmacros
-          printf '%%__gpg_sign_cmd %%{__gpg} --batch --no-verbose --no-armor --pinentry-mode loopback %%{?_gpg_digest_algo:--digest-algo %%{_gpg_digest_algo}} --no-secmem-warning -u "%%{_gpg_name}" -sbo %%{__signature_filename} %%{__plaintext_filename}\n' >> ~/.rpmmacros
-
-          echo "Signing RPM packages in dist/..."
-          ls dist/*.rpm >/dev/null 2>&1 || { echo "::error::No RPM packages found in dist/!"; exit 1; }
-          rpmsign --addsign dist/*.rpm
-
-          # Export public key to a regular file (avoids sudo closing process substitution /dev/fd/N)
-          gpg --armor --export "$GPG_KEY_ID" > /tmp/kvrocks-signing-key.asc
-          sudo rpm --import /tmp/kvrocks-signing-key.asc
-
-          echo "Verifying RPM package signatures..."
-          for rpm_pkg in dist/*.rpm; do
-            if ! verify_out=$(sudo rpm -K --define '_pkgverify_level all' "$rpm_pkg" 2>&1) || ! echo "$verify_out" | grep -q 'signatures OK'; then
-              echo "::error::RPM package $rpm_pkg signature verification failed: $verify_out"
-              exit 1
-            fi
-            echo "$verify_out"
-          done
-
-      - name: Generate Checksums & Consolidate Glibc Symbols
-        run: |
-          cd dist
-          sha256sum *.deb *.rpm *.tar.gz > SHA256SUMS
-          cat SHA256SUMS
-          cat glibc-symbols-*.txt 2>/dev/null | sort -Vu > glibc-symbols.txt || true
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_NAME }}
-          draft: ${{ inputs.draft == true || inputs.draft == 'true' }}
-          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
-          files: |
-            dist/*.deb
-            dist/*.rpm
-            dist/*.tar.gz
-            dist/SHA256SUMS
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Report Draft Release Status
-        if: inputs.draft == true || inputs.draft == 'true'
-        run: |
-          echo "### Draft Release Created" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: Draft release \`${{ env.RELEASE_TAG }}\` created on GitHub Releases." >> $GITHUB_STEP_SUMMARY
-          echo "- **Note**: Deployment to GitHub Pages skipped. Draft releases are not published to online APT/RPM repositories." >> $GITHUB_STEP_SUMMARY
-
-      - name: Build Debian APT & RPM Repositories (Incremental Merge)
-        if: inputs.draft != true && inputs.draft != 'true'
-        env:
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-          KVROCKS_GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Repository Tooling
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm xz-utils
 
-          # 1. Safely retrieve existing gh-pages deployment to preserve historical metadata
-          # Check if gh-pages branch genuinely exists on remote before cloning.
-          # If it exists on remote, git clone MUST succeed. If clone fails, abort immediately to protect historical records!
-          REMOTE_REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          HAS_PAGES=$(git ls-remote --heads "$REMOTE_REPO_URL" refs/heads/gh-pages | wc -l)
+      - name: Import GPG Key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 ~/.gnupg
+          cat > ~/.gnupg/gpg-agent.conf <<EOF
+          allow-loopback-pinentry
+          default-cache-ttl 3600
+          max-cache-ttl 7200
+          EOF
+          printf 'batch\npinentry-mode loopback\n' > ~/.gnupg/gpg.conf
 
-          rm -rf existing-pages
-          if [ "$HAS_PAGES" -gt 0 ]; then
-            echo "Existing gh-pages branch detected on remote. Cloning historical deployment..."
-            git clone --depth 1 --branch gh-pages "$REMOTE_REPO_URL" existing-pages
-            echo "Successfully retrieved existing gh-pages branch. Historical metadata will be preserved."
-          else
-            echo "No existing gh-pages branch found on remote. Initializing fresh repository."
-            mkdir -p existing-pages
+          gpg --import <<<"$GPG_PRIVATE_KEY"
+          mapfile -t fingerprints < <(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{want=1} /^fpr:/&&want{print $10; want=0}')
+          if [ "${#fingerprints[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one secret key in GPG_PRIVATE_KEY, found ${#fingerprints[@]}"
+            exit 1
           fi
+          key_id="${fingerprints[0]}"
+          echo "default-key ${key_id}" >> ~/.gnupg/gpg.conf
+          echo "GPG_KEY_ID=${key_id}" >> "$GITHUB_ENV"
 
-          # 2. Prepare directory skeleton for metadata publishing (Strict Zero-Binary Guarantee)
-          # Preserve existing channel trees from previous deployment (e.g. keep stable when deploying testing)
-          rm -rf public-repo
-          mkdir -p public-repo
-          if [ -d existing-pages/dists ]; then
-            cp -r existing-pages/dists public-repo/
-          fi
-          if [ -d existing-pages/rpm ]; then
-            cp -r existing-pages/rpm public-repo/
-          fi
-
-          mkdir -p "public-repo/dists/${CHANNEL}/main/binary-amd64"
-          mkdir -p "public-repo/dists/${CHANNEL}/main/binary-arm64"
-
-          # Symmetrical channel-first RPM repository layout: rpm/${CHANNEL}/${arch}
-          RPM_CHANNEL_DIR="public-repo/rpm/${CHANNEL}"
-          RPM_EXISTING_PREFIX="existing-pages/rpm/${CHANNEL}"
-
-          mkdir -p "${RPM_CHANNEL_DIR}/x86_64"
-          mkdir -p "${RPM_CHANNEL_DIR}/aarch64"
-
-          GPG_KEY_ID="${GPG_KEY_ID:-$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | tail -n 1)}"
-
-          # Export public keys
-          gpg --batch --yes --export "$GPG_KEY_ID" > public-repo/kvrocks.gpg
-          gpg --batch --yes --armor --export "$GPG_KEY_ID" > public-repo/kvrocks.asc
-
-          # Copy installer script, landing page, and generate client repo config
-          cp scripts/install.sh public-repo/install.sh
-          cp web/index.html public-repo/index.html
-
-          # Single Source of Truth for Edge Gateway URL (supports vars.KVROCKS_GATEWAY_URL override)
-          GATEWAY_URL="${KVROCKS_GATEWAY_URL:-https://kvrocks.kryo.eu.org}"
-          printf '[kvrocks]\nname=Apache Kvrocks Repository\nbaseurl=%s/rpm/stable/$basearch/\nenabled=1\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n\n[kvrocks-testing]\nname=Apache Kvrocks Testing Repository\nbaseurl=%s/rpm/testing/$basearch/\nenabled=0\ngpgcheck=1\nrepo_gpgcheck=1\ngpgkey=%s/kvrocks.asc\n' "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" "$GATEWAY_URL" > public-repo/kvrocks.repo
-          touch public-repo/.nojekyll
-
-          # Prime gpg-agent in-memory cache via stdin pipeline if needed (avoids writing passphrase to disk)
+          # Cache the passphrase in gpg-agent (memory only) for all later signing steps
           if [ -n "$GPG_PASSPHRASE" ]; then
-            printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -u "$GPG_KEY_ID" -sbo /dev/null /dev/null
+            printf '%s' "$GPG_PASSPHRASE" | gpg --yes --passphrase-fd 0 -sbo /dev/null /dev/null
           fi
 
-          # Prepare GPG base arguments (in-memory gpg-agent daemon handles passphrase caching)
-          GPG_BASE_ARGS=(--batch --yes --default-key "$GPG_KEY_ID" --pinentry-mode loopback)
+      - name: Sign & Verify RPM Packages
+        run: |
+          cat > ~/.rpmmacros <<EOF
+          %_signature gpg
+          %_gpg_name ${GPG_KEY_ID}
+          %_gpg_path ${HOME}/.gnupg
+          %_gpg_digest_algo sha256
+          %__gpg /usr/bin/gpg
+          %__gpg_sign_cmd %{__gpg} --batch --no-verbose --no-armor --pinentry-mode loopback %{?_gpg_digest_algo:--digest-algo %{_gpg_digest_algo}} --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} %{__plaintext_filename}
+          EOF
+          rpmsign --addsign dist/*.rpm
 
-          # 3. Stage newly built packages into temporary isolated sandbox (never copied into public-repo)
-          mkdir -p staging/deb/pool/main
-          mkdir -p staging/rpm/x86_64
-          mkdir -p staging/rpm/aarch64
+          gpg --armor --export "$GPG_KEY_ID" > "$RUNNER_TEMP/kvrocks.asc"
+          sudo rpm --import "$RUNNER_TEMP/kvrocks.asc"
+          for rpm_pkg in dist/*.rpm; do
+            result=$(sudo rpm -K --define '_pkgverify_level all' "$rpm_pkg")
+            echo "$result"
+            grep -q 'signatures OK' <<<"$result"
+          done
 
+      - name: Generate Checksums
+        working-directory: dist
+        run: sha256sum -- *.deb *.rpm *.tar.gz | tee SHA256SUMS
+
+      # The release stays a draft (no tag, no public assets) until the repository metadata is live.
+      - name: Create Draft GitHub Release
+        env:
+          RELEASE_TITLE: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
+        run: |
+          args=(--draft --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --generate-notes)
+          if [ "$CHANNEL" = testing ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "${args[@]}" dist/*
+
+      - name: Stage New Packages
+        run: |
+          mkdir -p staging/deb/pool/main staging/rpm/x86_64 staging/rpm/aarch64
           cp dist/*.deb staging/deb/pool/main/
           cp dist/*.x86_64.rpm staging/rpm/x86_64/
           cp dist/*.aarch64.rpm staging/rpm/aarch64/
 
-          # Verify packages were staged properly in sandbox
-          if ! ls staging/deb/pool/main/*.deb >/dev/null 2>&1; then
-            echo "::error::No Debian packages found in staging!"
-            exit 1
-          fi
+      - name: Update APT Repository
+        run: |
+          arches=(amd64 arm64)
+          release_dir="pages/dists/${CHANNEL}"
 
-          # ==========================================
-          # 4. Build Debian APT Metadata (Incremental Merge)
-          # ==========================================
-          ROOT_DIR="$(pwd)"
-          for deb_arch in amd64 arm64; do
-            (
-              cd staging/deb
-              dpkg-scanpackages -m --arch "$deb_arch" pool/main > "${ROOT_DIR}/public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
-            )
+          for arch in "${arches[@]}"; do
+            index_dir="${release_dir}/main/binary-${arch}"
+            mkdir -p "$index_dir"
+            new_index="${RUNNER_TEMP}/Packages.${arch}"
+            (cd staging/deb && dpkg-scanpackages --multiversion --arch "$arch" pool/main) > "$new_index"
 
-            old_pkg="${ROOT_DIR}/existing-pages/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
-            [ -f "$old_pkg" ] || old_pkg="none"
+            # A channel/arch without a Packages file yet is the first release of that channel
+            old_args=()
+            if [ -f "${index_dir}/Packages" ]; then
+              old_args=(--old "${index_dir}/Packages")
+            fi
+            python3 packaging/merge-deb-packages.py "${old_args[@]}" "$new_index" "${index_dir}/Packages"
 
-            echo "=== Merging Debian APT Packages (${CHANNEL}/${deb_arch}) ==="
-            python3 "${ROOT_DIR}/packaging/merge-deb-packages.py" "$old_pkg" \
-              "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new" \
-              "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages"
-            rm -f "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.new"
-
-            # Compress Packages with both gzip and xz
-            gzip -9c "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.gz"
-            xz -9c "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages" > "public-repo/dists/${CHANNEL}/main/binary-${deb_arch}/Packages.xz"
+            gzip -9cn "${index_dir}/Packages" > "${index_dir}/Packages.gz"
+            xz -9c "${index_dir}/Packages" > "${index_dir}/Packages.xz"
           done
 
-          (
-            cd "public-repo/dists/${CHANNEL}"
-            apt-ftparchive \
-              -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
-              -o APT::FTPArchive::Release::Label="Kvrocks" \
-              -o APT::FTPArchive::Release::Suite="${CHANNEL}" \
-              -o APT::FTPArchive::Release::Codename="${CHANNEL}" \
-              -o APT::FTPArchive::Release::Architectures="amd64 arm64" \
-              -o APT::FTPArchive::Release::Components="main" \
-              -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository (${CHANNEL})" \
-              release . > Release
+          cd "$release_dir"
+          rm -f Release InRelease Release.gpg
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
+            -o APT::FTPArchive::Release::Label="Kvrocks" \
+            -o APT::FTPArchive::Release::Suite="${CHANNEL}" \
+            -o APT::FTPArchive::Release::Codename="${CHANNEL}" \
+            -o APT::FTPArchive::Release::Architectures="${arches[*]}" \
+            -o APT::FTPArchive::Release::Components="main" \
+            -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository (${CHANNEL})" \
+            release . > Release
 
-            # Debian SecureApt standardizes on SHA512
-            gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 --clearsign -o InRelease Release
-            gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA512 -abs -o Release.gpg Release
+          # Debian SecureApt standardizes on SHA512
+          gpg --yes --digest-algo SHA512 --clearsign -o InRelease Release
+          gpg --yes --digest-algo SHA512 -abs -o Release.gpg Release
+          gpg --verify InRelease
+          gpg --verify Release.gpg Release
 
-            # Verify generated signatures immediately
-            gpg --verify InRelease
-            gpg --verify Release.gpg Release
-          )
-
-          # ==========================================
-          # 5. Build RPM Metadata (Incremental Merge using mergerepo_c)
-          # ==========================================
+      - name: Update RPM Repository
+        run: |
           for arch in x86_64 aarch64; do
-            echo "=== Generating RPM Metadata for ${CHANNEL}/${arch} ==="
-            if ! ls "staging/rpm/${arch}/"*.rpm >/dev/null 2>&1; then
-              echo "::error::No RPM packages found in staging/rpm/${arch}/!"
-              exit 1
+            repo_dir="pages/rpm/${CHANNEL}/${arch}"
+            new_repo="staging/rpm/${arch}"
+            mkdir -p "$repo_dir"
+
+            createrepo_c --quiet "$new_repo"
+            new_repodata="${new_repo}/repodata"
+
+            # A channel/arch without repodata yet is the first release of that channel
+            if [ -d "${repo_dir}/repodata" ]; then
+              merged_dir=$(mktemp -d)
+              mergerepo_c --all --repo "$repo_dir" --repo "$new_repo" -o "$merged_dir"
+              new_repodata="${merged_dir}/repodata"
             fi
 
-            createrepo_c "staging/rpm/${arch}/"
-            rm -rf "${RPM_CHANNEL_DIR}/${arch}/repodata"
+            rm -rf "${repo_dir}/repodata"
+            mv "$new_repodata" "${repo_dir}/repodata"
 
-            if [ -d "${RPM_EXISTING_PREFIX}/${arch}/repodata" ]; then
-              echo "Merging RPM repository metadata for ${CHANNEL}/${arch}..."
-              mergerepo_c --all \
-                --repo "${RPM_EXISTING_PREFIX}/${arch}/" \
-                --repo "staging/rpm/${arch}/" \
-                -o "${RPM_CHANNEL_DIR}/${arch}/"
-            else
-              echo "Initializing new RPM repository metadata for ${CHANNEL}/${arch}..."
-              mkdir -p "${RPM_CHANNEL_DIR}/${arch}"
-              cp -r "staging/rpm/${arch}/repodata" "${RPM_CHANNEL_DIR}/${arch}/"
-            fi
-
-            if [ ! -f "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml" ]; then
-              echo "::error::RPM repomd.xml was not generated for ${CHANNEL}/${arch}!"
-              exit 1
-            fi
-
-            # RPM detached GPG signature
-            gpg "${GPG_BASE_ARGS[@]}" --digest-algo SHA256 --detach-sign --armor \
-              -o "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml.asc" "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml"
-            gpg --verify "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml.asc" "${RPM_CHANNEL_DIR}/${arch}/repodata/repomd.xml"
+            gpg --yes --digest-algo SHA256 --detach-sign --armor -o "${repo_dir}/repodata/repomd.xml.asc" "${repo_dir}/repodata/repomd.xml"
+            gpg --verify "${repo_dir}/repodata/repomd.xml.asc" "${repo_dir}/repodata/repomd.xml"
           done
-          rm -rf staging existing-pages
 
-          # ==========================================
-          # 6. Quality Gate: Zero-Binary Invariant Audit
-          # ==========================================
-          # Ensure public-repo contains strictly metadata (<100KB), completely eliminating quota limits.
-          # Binary packages are permanently hosted on GitHub Releases and streamed via Cloudflare Edge Gateway.
-          LEAKED_PACKAGES=$(find public-repo -type f \( -name "*.deb" -o -name "*.rpm" \))
-          if [ -n "$LEAKED_PACKAGES" ]; then
-            echo "::error title=Binary Leak Detected::Package binaries unexpectedly found in metadata repository:"
-            echo "$LEAKED_PACKAGES"
+      - name: Publish Signing Key & Repository Config
+        run: |
+          gpg --yes --export "$GPG_KEY_ID" > pages/kvrocks.gpg
+          gpg --yes --armor --export "$GPG_KEY_ID" > pages/kvrocks.asc
+          sed "s|@GATEWAY_URL@|${GATEWAY_URL%/}|g" packaging/kvrocks.repo.in > pages/kvrocks.repo
+          touch pages/.nojekyll
+
+      # The repository only hosts metadata; binaries live on GitHub Releases and are served by the gateway.
+      - name: Audit Zero-Binary Invariant
+        run: |
+          leaked=$(find pages -name .git -prune -o -type f \( -name '*.deb' -o -name '*.rpm' \) -print)
+          if [ -n "$leaked" ]; then
+            echo "::error title=Binary Leak Detected::Package binaries found in the metadata repository:"
+            echo "$leaked"
             exit 1
           fi
 
-          TOTAL_PAGES_KB=$(du -sk public-repo | cut -f1)
-          echo "Total metadata repository footprint: ${TOTAL_PAGES_KB} KB"
+      - name: Deploy Repository Metadata to GitHub Pages
+        working-directory: pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "release: ${RELEASE_TAG} (${CHANNEL})"
+          git push origin gh-pages
 
-          echo "### Dual APT & RPM Metadata Repositories Generated (${CHANNEL})" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release Channel**: \`${CHANNEL}\` ($( [ "$IS_PRERELEASE" = "true" ] && echo "Pre-release / Testing" || echo "Stable Production" ))" >> $GITHUB_STEP_SUMMARY
-          echo "- **Edge Gateway Endpoint**: \`${GATEWAY_URL}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **APT Repository (via Gateway)**: \`${GATEWAY_URL} ${CHANNEL} main\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **RPM Repository (via Gateway)**: \`${GATEWAY_URL}/rpm/${CHANNEL}/\$basearch/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **YUM / DNF Repo Config**: \`${GATEWAY_URL}/kvrocks.repo\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **GPG Public Key (ASCII)**: \`${GATEWAY_URL}/kvrocks.asc\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **GitHub Pages Footprint**: \`${TOTAL_PAGES_KB} KB\` (Zero binary bloat, multi-channel retention enabled)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Binary Asset Storage**: Hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) & stream-cached at Cloudflare Edge." >> $GITHUB_STEP_SUMMARY
+      - name: Publish GitHub Release
+        run: gh release edit "$RELEASE_TAG" --draft=false
 
-      - name: Deploy Repositories to GitHub Pages
-        if: inputs.draft != true && inputs.draft != 'true'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public-repo
-          keep_files: false
+      - name: Summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Release ${RELEASE_TAG} published (\`${CHANNEL}\` channel)
+          - **Release**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}
+          - **APT**: \`${GATEWAY_URL%/} ${CHANNEL} main\`
+          - **RPM**: \`${GATEWAY_URL%/}/rpm/${CHANNEL}/\$basearch/\`
+          - **DNF repo config**: \`${GATEWAY_URL%/}/kvrocks.repo\`
+          - **GPG public key**: \`${GATEWAY_URL%/}/kvrocks.asc\`
+          EOF

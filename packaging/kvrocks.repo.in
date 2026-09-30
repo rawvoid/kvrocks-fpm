@@ -1,0 +1,15 @@
+[kvrocks]
+name=Apache Kvrocks Repository
+baseurl=@GATEWAY_URL@/rpm/stable/$basearch/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=@GATEWAY_URL@/kvrocks.asc
+
+[kvrocks-testing]
+name=Apache Kvrocks Testing Repository
+baseurl=@GATEWAY_URL@/rpm/testing/$basearch/
+enabled=0
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=@GATEWAY_URL@/kvrocks.asc

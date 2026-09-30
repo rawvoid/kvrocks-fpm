@@ -51,13 +51,13 @@ jobs:
 
           cd gh-pages-branch
 
-          # 2. Skip commit if there are no changes
+          # 3. Skip commit if there are no changes
           if [ -z "$(git status --porcelain)" ]; then
             echo "Static assets on gh-pages are already up to date. Nothing to commit."
             exit 0
           fi
 
-          # 3. Commit and push changes
+          # 4. Commit and push changes
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

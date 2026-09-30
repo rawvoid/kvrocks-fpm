@@ -1,130 +1,91 @@
 #!/usr/bin/env python3
 """
-Merge Debian APT `Packages` index files while preserving historical versions.
-Parses RFC 822 stanzas, deduplicating by (Package, Architecture, Version) key,
-overwriting duplicates with new entries, and appending new versions.
+Merge Debian APT `Packages` index files in an append-only fashion.
+
+Stanzas are keyed by (Package, Architecture, Version). Historical stanzas are kept untouched and the
+new ones are added. Anything suspicious (malformed stanzas, a version that is already indexed) is an
+error: a published version must never be silently altered or dropped from the index.
 """
 
-import os
-import sys
-import tempfile
-from typing import Dict, List, Optional, Tuple
+import argparse
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
+Key = Tuple[str, str, str]
+
+KEY_FIELDS = ("package", "architecture", "version")
 
 
 def parse_stanzas(content: str) -> List[str]:
-    """Parse raw Packages content into individual RFC 822 stanzas."""
-    stanzas: List[str] = []
-    current_lines: List[str] = []
-
-    for raw_line in content.splitlines(keepends=True):
-        line = raw_line.rstrip("\r\n")
-        if not line.strip():
-            if current_lines:
-                stanzas.append("".join(current_lines).strip())
-                current_lines = []
-        else:
-            current_lines.append(raw_line)
-
-    if current_lines:
-        stanzas.append("".join(current_lines).strip())
-
-    return stanzas
+    """Split a Packages index into its RFC 822 stanzas (separated by blank lines)."""
+    return [stanza.strip() for stanza in re.split(r"\n\s*\n", content) if stanza.strip()]
 
 
-def extract_stanza_key(stanza: str) -> Optional[Tuple[str, str, str]]:
-    """Extract (Package, Architecture, Version) tuple from a stanza."""
-    pkg = None
-    arch = None
-    ver = None
-
+def extract_stanza_key(stanza: str) -> Key:
+    """Return the (Package, Architecture, Version) key of a stanza; raise ValueError if it is incomplete."""
+    fields: Dict[str, str] = {}
     for line in stanza.splitlines():
-        if line.startswith("Package:"):
-            pkg = line.split(":", 1)[1].strip()
-        elif line.startswith("Architecture:"):
-            arch = line.split(":", 1)[1].strip()
-        elif line.startswith("Version:"):
-            ver = line.split(":", 1)[1].strip()
+        if line.startswith((" ", "\t")):  # continuation of the previous field
+            continue
+        name, separator, value = line.partition(":")
+        if separator:
+            fields.setdefault(name.strip().lower(), value.strip())
 
-    if pkg and arch and ver:
-        return (pkg, arch, ver)
-    return None
+    missing = [name for name in KEY_FIELDS if not fields.get(name)]
+    if missing:
+        raise ValueError(f"Stanza is missing required field(s) {', '.join(missing)}:\n{stanza}")
+    return fields["package"], fields["architecture"], fields["version"]
 
 
-def merge_packages(old_file: Optional[str], new_file: str, output_file: str) -> None:
-    """Merge old and new Packages files into output_file atomically."""
-    merged: Dict[Tuple[str, str, str], str] = {}
-
-    # 1. Load existing stanzas if old_file exists and is readable
-    if old_file:
-        if not os.path.isfile(old_file):
-            raise FileNotFoundError(f"Existing packages file specified but not found: {old_file}")
-        with open(old_file, "r", encoding="utf-8", errors="replace") as f:
-            old_stanzas = parse_stanzas(f.read())
-        for stanza in old_stanzas:
-            key = extract_stanza_key(stanza)
-            if key:
-                merged[key] = stanza
-
-    # 2. Load and overlay new stanzas (must exist and contain valid stanzas)
-    if not os.path.isfile(new_file):
-        raise FileNotFoundError(f"New packages file not found: {new_file}")
-
-    with open(new_file, "r", encoding="utf-8", errors="replace") as f:
-        new_stanzas = parse_stanzas(f.read())
-
-    if not new_stanzas:
-        raise ValueError(f"New packages file {new_file} contains no package stanzas")
-
-    for stanza in new_stanzas:
+def load_index(path: Path) -> Dict[Key, str]:
+    """Load a Packages file into a {key: stanza} mapping."""
+    index: Dict[Key, str] = {}
+    for stanza in parse_stanzas(path.read_text(encoding="utf-8")):
         key = extract_stanza_key(stanza)
-        if not key:
-            raise ValueError(f"Failed to extract (Package, Architecture, Version) key from stanza in {new_file}:\n{stanza}")
-        merged[key] = stanza
+        if key in index:
+            raise ValueError(f"Duplicate stanza {key} in {path}")
+        index[key] = stanza
+    return index
 
-    # 3. Format output
-    output_lines = []
-    for stanza in merged.values():
-        output_lines.append(stanza)
 
-    out_content = "\n\n".join(output_lines)
-    if out_content:
-        out_content += "\n"
+def merge_packages(
+    old_file: Optional[Union[str, Path]],
+    new_file: Union[str, Path],
+    output_file: Union[str, Path],
+) -> None:
+    """Append the stanzas of `new_file` to those of `old_file` (if any) and write `output_file`."""
+    merged = load_index(Path(old_file)) if old_file else {}
 
-    # 4. Atomic write with cleanup on error
-    out_dir = os.path.dirname(os.path.abspath(output_file))
-    os.makedirs(out_dir, exist_ok=True)
-    temp_name = None
-    try:
-        with tempfile.NamedTemporaryFile("w", dir=out_dir, encoding="utf-8", delete=False) as tf:
-            tf.write(out_content)
-            temp_name = tf.name
-        os.replace(temp_name, output_file)
-    except Exception:
-        if temp_name and os.path.exists(temp_name):
-            try:
-                os.unlink(temp_name)
-            except OSError:
-                pass
-        raise
+    new = load_index(Path(new_file))
+    if not new:
+        raise ValueError(f"{new_file} contains no package stanzas")
 
-    print(f"Successfully merged {len(merged)} package stanza(s) into {output_file}")
+    already_indexed = sorted(merged.keys() & new.keys())
+    if already_indexed:
+        raise ValueError(f"Refusing to overwrite already indexed package version(s): {already_indexed}")
+    merged.update(new)
+
+    content = "\n\n".join(merged[key] for key in sorted(merged)) + "\n"
+
+    output = Path(output_file)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp = output.with_name(output.name + ".tmp")
+    temp.write_text(content, encoding="utf-8")
+    temp.chmod(0o644)
+    temp.replace(output)
+
+    print(f"Merged {len(new)} new stanza(s) into {len(merged) - len(new)} existing ones: {output}")
 
 
 def main() -> None:
-    if len(sys.argv) < 4:
-        print(f"Usage: {sys.argv[0]} <old-Packages-file|none> <new-Packages-file> <output-Packages-file>", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    parser.add_argument("--old", help="existing Packages file to append to (omit for the first release)")
+    parser.add_argument("new", help="Packages file containing the newly built packages")
+    parser.add_argument("output", help="merged Packages file to write (may be the same as --old)")
+    args = parser.parse_args()
 
-    old_path = sys.argv[1]
-    new_path = sys.argv[2]
-    out_path = sys.argv[3]
-
-    if old_path.lower() in ("none", "", "null", "-"):
-        old_file = None
-    else:
-        old_file = old_path
-
-    merge_packages(old_file, new_path, out_path)
+    merge_packages(args.old, args.new, args.output)
 
 
 if __name__ == "__main__":
