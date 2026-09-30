@@ -271,7 +271,7 @@ jobs:
           fi
 
           # Systemd service unit (unified standard path /usr/lib/systemd/system)
-          cp systemd/kvrocks.service rootfs/usr/lib/systemd/system/
+          cp packaging/systemd/kvrocks.service rootfs/usr/lib/systemd/system/
 
           # Display colored unified diff in a collapsible group
           echo "::group::View Configuration Diff (Upstream vs Patched)"
