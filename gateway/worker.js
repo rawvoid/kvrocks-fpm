@@ -9,65 +9,55 @@
  *    - Eliminates Great Firewall (GFW) blocking/throttling for clients in mainland China.
  *    - Supports HEAD requests and optional ?redirect=1 for direct HTTP 302 redirects.
  *
- * 2. Repository Metadata & Assets (InRelease, repomd.xml, *.repo, *.asc, install.sh):
+ * 2. Repository Metadata, Static Assets & Root Landing Page (index.html, InRelease, repomd.xml, *.repo, *.asc, install.sh):
  *    - Proxies directly from GitHub Pages (configured via METADATA_ORIGIN).
- *    - Applies intelligent edge caching (5 minutes for index, 24 hours for GPG keys).
+ *    - Applies intelligent edge caching (5 minutes for index, 24 hours for GPG keys, 10 minutes for web/scripts).
  *    - Adds permissive CORS headers.
- *
- * 3. Health & Status Check (/ or /healthz):
- *    - Returns diagnostic JSON with service details and configuration.
  */
 
-export const DEFAULT_GITHUB_REPO = "rawvoid/kvrocks-fpm";
-export const DEFAULT_METADATA_ORIGIN = "https://rawvoid.github.io/kvrocks-fpm";
+// Pre-compiled regular expressions for Linux package resolution
+const DEB_PKG_RE = /^[^_]+_([0-9]+\.[0-9]+\.[0-9]+[^_]*)_[^_]+\.deb$/;
+const RPM_PKG_RE = /-([0-9]+\.[0-9]+\.[0-9]+(?:-[^.]+)?-[0-9A-Za-z.+~]+)\.(?:x86_64|aarch64)\.rpm$/;
 
 /**
  * Deterministically resolves the target GitHub Release download URL for a given package path.
  *
  * @param {string} pathname Request URL path (e.g. /pool/main/kvrocks_2.17.0-1_amd64.deb)
  * @param {string} repo GitHub repository slug (owner/repo)
- * @returns {string|null} Full GitHub Release asset URL, or null if filename is unparseable
+ * @returns {string|null} Full GitHub Release asset URL, or null if filename or repo is missing/unparseable
  */
-export function resolveReleaseDownloadUrl(pathname, repo = DEFAULT_GITHUB_REPO) {
-  const filename = pathname.split("/").pop();
-  if (!filename) return null;
+export function resolveReleaseDownloadUrl(pathname, repo) {
+  if (!repo || !pathname) return null;
+  const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
 
-  let tag = null;
+  // 1. Debian package convention: <package>_<version>_<architecture>.deb
+  const deb = filename.match(DEB_PKG_RE);
+  if (deb) return `https://github.com/${repo}/releases/download/v${deb[1]}/${filename}`;
 
-  // Debian packages: kvrocks_<ver>-<iter>_<arch>.deb or kvrocks-legacy_<ver>-<iter>_<arch>.deb
-  // Debian policy enforces exactly 2 underscores: <package>_<version>_<arch>.deb
-  if (filename.endsWith(".deb")) {
-    const parts = filename.split("_");
-    if (parts.length >= 3) {
-      const ver = parts[parts.length - 2];
-      // Verify version follows semver-iteration pattern: X.Y.Z-I or X.Y.Z-tag-I (e.g. 2.17.0-1, 2.17.0-1ubuntu1)
-      if (/^[0-9]+\.[0-9]+\.[0-9]+(?:-[^._]+)?-[0-9A-Za-z.+~]+$/.test(ver)) {
-        tag = `v${ver}`;
-      }
-    }
-  }
-
-  // RPM packages: kvrocks-<ver>-<iter>.<arch>.rpm or kvrocks-legacy-<ver>-<iter>.<arch>.rpm
-  else if (filename.endsWith(".rpm")) {
-    const match = filename.match(/-(?:legacy-)?([0-9]+\.[0-9]+\.[0-9]+(?:-[^.]+)?-[0-9A-Za-z.+~]+)\.(?:x86_64|aarch64)\.rpm$/);
-    if (match) {
-      tag = `v${match[1]}`;
-    }
-  }
-
-  if (tag) {
-    return `https://github.com/${repo}/releases/download/${tag}/${filename}`;
-  }
+  // 2. RPM package convention: <name>-<version>-<release>.<architecture>.rpm
+  const rpm = filename.match(RPM_PKG_RE);
+  if (rpm) return `https://github.com/${repo}/releases/download/v${rpm[1]}/${filename}`;
 
   return null;
 }
 
 export default {
   async fetch(request, env, ctx) {
+    const githubRepo = env?.GITHUB_REPO;
+    const metadataOrigin = env?.METADATA_ORIGIN;
+
+    if (!githubRepo || !metadataOrigin) {
+      return new Response(
+        "Gateway Misconfiguration: GITHUB_REPO and METADATA_ORIGIN environment variables are required.",
+        {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        }
+      );
+    }
+
     const url = new URL(request.url);
     const pathname = url.pathname;
-    const githubRepo = env?.GITHUB_REPO || DEFAULT_GITHUB_REPO;
-    const metadataOrigin = env?.METADATA_ORIGIN || DEFAULT_METADATA_ORIGIN;
 
     // 1. Binary Package Requests (*.deb, *.rpm) -> Stream Proxy + Edge Cache
     if (pathname.endsWith(".deb") || pathname.endsWith(".rpm")) {
