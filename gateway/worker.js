@@ -1,161 +1,220 @@
 /**
- * Apache Kvrocks Package Repository Edge Gateway (Cloudflare Worker)
+ * Apache Kvrocks package repository edge gateway (Cloudflare Worker).
  *
- * Responsibilities:
- * 1. Binary Package Downloads (*.deb, *.rpm):
- *    - Resolves the exact release tag deterministically from the package filename.
- *    - Fetches the package from GitHub Releases and stream-proxies (200 OK) directly to the client.
- *    - Caches packages in Cloudflare's Edge Cache for 1 year (immutable).
- *    - Eliminates Great Firewall (GFW) blocking/throttling for clients in mainland China.
- *    - Supports HEAD requests.
- *
- * 2. Repository Metadata, Static Assets & Root Landing Page (index.html, InRelease, repomd.xml, *.repo, *.asc, install.sh):
- *    - Proxies directly from GitHub Pages (configured via METADATA_ORIGIN).
- *    - Applies intelligent edge caching (5 minutes for index, 24 hours for GPG keys, 10 minutes for web/scripts).
- *    - Adds permissive CORS headers.
+ * - Packages (/pool/*.deb, /rpm/**.rpm) are stored on GitHub Releases. The release tag is derived
+ *   from the filename (tag = `v${VERSION}-${ITERATION}`, see release.yaml), so no GitHub API call is
+ *   needed. Full 200 responses are cached via caches.default keyed by the canonical GitHub URL, because
+ *   GitHub answers with a short-lived signed redirect that `cf.cacheEverything` must not pin.
+ * - Everything else (APT/DNF metadata, keys, installer, landing page) is proxied from GitHub Pages with
+ *   `cf.cacheEverything`. APT/DNF indexes get a short TTL to keep the window in which an edge holds a
+ *   mix of old and new files small; content-addressed DNF repodata is immutable.
+ * - Only GET/HEAD are served. Client headers and query strings are never forwarded upstream, so they can
+ *   neither fragment nor bust the cache. Conditional requests for metadata are answered by the Worker.
  */
 
-// Pre-compiled regular expressions for Linux package resolution
+// Filename conventions: deb `<name>_<version>-<revision>_<arch>.deb`, rpm `<name>-<version>-<release>.<arch>.rpm`.
+// Capture group 1 is `${VERSION}-${ITERATION}`, i.e. the release tag without the leading "v".
 const DEB_PKG_RE = /^[^_]+_([0-9]+\.[0-9]+\.[0-9]+[^_]*)_[^_]+\.deb$/;
-const RPM_PKG_RE = /-([0-9]+\.[0-9]+\.[0-9]+(?:-[^.]+)?-[0-9A-Za-z.+~]+)\.(?:x86_64|aarch64)\.rpm$/;
+const RPM_PKG_RE = /-([0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+~-]*-[0-9A-Za-z.+~]+)\.(?:x86_64|aarch64)\.rpm$/;
+
+// Indexes that change on every release and reference each other (Release -> Packages, repomd.xml -> repodata).
+const REPO_INDEX_RE = /\/(?:InRelease|Release|Release\.gpg|Packages(?:\.\w+)?|repomd\.xml(?:\.asc)?)$/;
+// createrepo_c/mergerepo_c name repodata files `<checksum>-<type>.<ext>`, so their content never changes.
+const HASHED_REPODATA_RE = /\/repodata\/[0-9a-f]{32,}-/i;
+const SIGNING_KEY_RE = /\.(?:asc|gpg)$/;
+
+const PACKAGE_TTL = 365 * 24 * 3600;
+const REPO_INDEX_TTL = 60;
+const HASHED_REPODATA_TTL = 30 * 24 * 3600;
+const SIGNING_KEY_TTL = 24 * 3600;
+const DEFAULT_TTL = 600;
+const NEGATIVE_TTL = 30;
+
+const PACKAGE_RESPONSE_HEADERS = [
+  "content-type",
+  "content-length",
+  "content-range",
+  "content-disposition",
+  "etag",
+  "last-modified",
+];
 
 /**
- * Deterministically resolves the target GitHub Release download URL for a given package path.
+ * Percent-encodes a filename or version for use as one URL path segment, keeping `+` literal.
+ * `encodeURIComponent` also escapes `/`, `?` and `#`, so the value cannot alter the URL structure.
+ */
+function encodePathSegment(value) {
+  return encodeURIComponent(value).replaceAll("%2B", "+");
+}
+
+/**
+ * Resolves the GitHub Release asset URL for a package request path.
  *
- * @param {string} pathname Request URL path (e.g. /pool/main/kvrocks_2.17.0-1_amd64.deb)
+ * @param {string} pathname Request path, e.g. /pool/main/kvrocks_2.17.0-1_amd64.deb
  * @param {string} repo GitHub repository slug (owner/repo)
- * @returns {string|null} Full GitHub Release asset URL, or null if filename or repo is missing/unparseable
+ * @returns {string|null} Asset URL, or null if the filename is not a recognised package name
  */
 export function resolveReleaseDownloadUrl(pathname, repo) {
   if (!repo || !pathname) return null;
-  const filename = pathname.slice(pathname.lastIndexOf("/") + 1);
 
-  // 1. Debian package convention: <package>_<version>_<architecture>.deb
-  const deb = filename.match(DEB_PKG_RE);
-  if (deb) return `https://github.com/${repo}/releases/download/v${deb[1]}/${filename}`;
+  let filename;
+  try {
+    filename = decodeURIComponent(pathname.slice(pathname.lastIndexOf("/") + 1));
+  } catch {
+    return null;
+  }
 
-  // 2. RPM package convention: <name>-<version>-<release>.<architecture>.rpm
-  const rpm = filename.match(RPM_PKG_RE);
-  if (rpm) return `https://github.com/${repo}/releases/download/v${rpm[1]}/${filename}`;
+  const match = filename.match(DEB_PKG_RE) ?? filename.match(RPM_PKG_RE);
+  if (!match) return null;
 
-  return null;
+  return `https://github.com/${repo}/releases/download/v${encodePathSegment(match[1])}/${encodePathSegment(filename)}`;
+}
+
+function textResponse(body, status, headers = {}) {
+  return new Response(body, { status, headers: { "Content-Type": "text/plain", ...headers } });
+}
+
+function isPackagePath(pathname) {
+  return (
+    (pathname.startsWith("/pool/") && pathname.endsWith(".deb")) ||
+    (pathname.startsWith("/rpm/") && pathname.endsWith(".rpm"))
+  );
+}
+
+function packageResponse(upstream, isHead, cacheStatus) {
+  const headers = new Headers({
+    "Cache-Control": `public, max-age=${PACKAGE_TTL}, immutable`,
+    "Accept-Ranges": "bytes",
+    "X-Cache-Status": cacheStatus,
+  });
+  for (const name of PACKAGE_RESPONSE_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  if (isHead) upstream.body?.cancel();
+  return new Response(isHead ? null : upstream.body, { status: upstream.status, headers });
+}
+
+async function handlePackage(request, ctx, repo, pathname) {
+  const targetUrl = resolveReleaseDownloadUrl(pathname, repo);
+  if (!targetUrl) {
+    return textResponse("Package Not Found in Repository (invalid package naming convention)", 404);
+  }
+
+  const isHead = request.method === "HEAD";
+  const range = request.headers.get("Range");
+  const cache = caches.default;
+
+  // The cache serves Range requests from a cached full object (206) on its own.
+  const cached = await cache.match(new Request(targetUrl, { headers: range ? { Range: range } : {} }));
+  if (cached) return packageResponse(cached, isHead, "HIT-CLOUDFLARE-EDGE");
+
+  const upstreamHeaders = { "User-Agent": "Kvrocks-Repository-Gateway/1.0" };
+  if (range) {
+    upstreamHeaders["Range"] = range;
+    const ifRange = request.headers.get("If-Range");
+    if (ifRange) upstreamHeaders["If-Range"] = ifRange;
+  }
+
+  // Always GET, even for HEAD: the redirect target is a signed URL that may only be valid for GET.
+  const upstream = await fetch(targetUrl, { headers: upstreamHeaders });
+  if (!upstream.ok) {
+    upstream.body?.cancel();
+    return textResponse(
+      `Failed to fetch package from upstream GitHub Releases (${upstream.status}): ${upstream.statusText}`,
+      upstream.status,
+      { "Cache-Control": "no-store" }
+    );
+  }
+
+  const response = packageResponse(upstream, isHead, "MISS-FETCHED-FROM-GITHUB");
+  if (upstream.status === 200 && !isHead) {
+    ctx.waitUntil(cache.put(new Request(targetUrl), response.clone()));
+  }
+  return response;
+}
+
+function cachePolicy(path) {
+  if (REPO_INDEX_RE.test(path)) return { ttl: REPO_INDEX_TTL };
+  if (HASHED_REPODATA_RE.test(path)) return { ttl: HASHED_REPODATA_TTL, immutable: true };
+  if (SIGNING_KEY_RE.test(path)) return { ttl: SIGNING_KEY_TTL };
+  return { ttl: DEFAULT_TTL };
+}
+
+// Only successful responses get the long TTL; errors must not be pinned by clients or proxies.
+function cacheControl(status, { ttl, immutable = false }) {
+  if (status >= 200 && status < 300) {
+    return `public, max-age=${ttl}, s-maxage=${ttl}${immutable ? ", immutable" : ""}`;
+  }
+  return status === 404 ? `public, max-age=${NEGATIVE_TTL}` : "no-store";
+}
+
+// RFC 9110 §13.1: If-None-Match (weak comparison) takes precedence over If-Modified-Since.
+function isNotModified(requestHeaders, responseHeaders) {
+  const ifNoneMatch = requestHeaders.get("If-None-Match");
+  if (ifNoneMatch) {
+    if (ifNoneMatch.trim() === "*") return true;
+    const etag = responseHeaders.get("ETag");
+    if (!etag) return false;
+    const opaque = (tag) => tag.trim().replace(/^W\//, "");
+    return ifNoneMatch.split(",").some((tag) => opaque(tag) === opaque(etag));
+  }
+
+  // Date.parse yields NaN for a missing or malformed header, which makes the comparison false.
+  const since = Date.parse(requestHeaders.get("If-Modified-Since"));
+  const modified = Date.parse(responseHeaders.get("Last-Modified"));
+  return modified <= since;
+}
+
+async function handleMetadata(request, metadataOrigin, pathname) {
+  const path = pathname === "/" ? "/index.html" : pathname;
+  const policy = cachePolicy(path);
+
+  // Plain string concatenation keeps the target on the configured origin, whatever the path looks like.
+  const upstream = await fetch(`${metadataOrigin.replace(/\/+$/, "")}${path}`, {
+    cf: {
+      cacheEverything: true,
+      cacheTtlByStatus: { "200-299": policy.ttl, "404": NEGATIVE_TTL, "500-599": -1 },
+    },
+  });
+
+  const headers = new Headers(upstream.headers);
+  headers.delete("set-cookie");
+  headers.set("Cache-Control", cacheControl(upstream.status, policy));
+
+  if (upstream.status === 200 && isNotModified(request.headers, upstream.headers)) {
+    upstream.body?.cancel();
+    const notModified = new Headers({ "Cache-Control": headers.get("Cache-Control") });
+    for (const name of ["ETag", "Last-Modified"]) {
+      const value = headers.get(name);
+      if (value) notModified.set(name, value);
+    }
+    return new Response(null, { status: 304, headers: notModified });
+  }
+
+  const isHead = request.method === "HEAD";
+  if (isHead) upstream.body?.cancel();
+  return new Response(isHead ? null : upstream.body, { status: upstream.status, headers });
 }
 
 export default {
   async fetch(request, env, ctx) {
-    const githubRepo = env?.GITHUB_REPO;
-    const metadataOrigin = env?.METADATA_ORIGIN;
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return textResponse("Method Not Allowed", 405, { Allow: "GET, HEAD" });
+    }
 
+    const { GITHUB_REPO: githubRepo, METADATA_ORIGIN: metadataOrigin } = env;
     if (!githubRepo || !metadataOrigin) {
-      return new Response(
+      return textResponse(
         "Gateway Misconfiguration: GITHUB_REPO and METADATA_ORIGIN environment variables are required.",
-        {
-          status: 500,
-          headers: { "Content-Type": "text/plain" },
-        }
+        500
       );
     }
 
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-
-    // 1. Binary Package Requests (*.deb, *.rpm) -> Stream Proxy + Edge Cache
-    if (pathname.endsWith(".deb") || pathname.endsWith(".rpm")) {
-      const targetUrl = resolveReleaseDownloadUrl(pathname, githubRepo);
-      if (!targetUrl) {
-        return new Response("Package Not Found in Repository (invalid package naming convention)", {
-          status: 404,
-          headers: { "Content-Type": "text/plain" },
-        });
-      }
-
-      // Check Cloudflare Edge Cache first
-      const cache = typeof caches !== "undefined" ? caches.default : null;
-      const cacheKey = new Request(url.toString(), request);
-      if (cache) {
-        const cachedResponse = await cache.match(cacheKey);
-        if (cachedResponse) {
-          const hitHeaders = new Headers(cachedResponse.headers);
-          hitHeaders.set("X-Cache-Status", "HIT-CLOUDFLARE-EDGE");
-          return new Response(cachedResponse.body, {
-            status: cachedResponse.status,
-            statusText: cachedResponse.statusText,
-            headers: hitHeaders,
-          });
-        }
-      }
-
-      // Stream proxy from GitHub Releases (CF fetch automatically follows 302 to AWS S3/CloudFront)
-      const isHead = request.method === "HEAD";
-      const upstreamResponse = await fetch(targetUrl, {
-        method: isHead ? "HEAD" : "GET",
-        headers: {
-          "User-Agent": "Kvrocks-Repository-Gateway/1.0",
-        },
-        redirect: "follow",
-      });
-
-      if (!upstreamResponse.ok) {
-        return new Response(
-          `Failed to fetch package from upstream GitHub Releases (${upstreamResponse.status}): ${upstreamResponse.statusText}`,
-          {
-            status: upstreamResponse.status,
-            headers: { "Content-Type": "text/plain" },
-          }
-        );
-      }
-
-      // Construct edge-cacheable response headers
-      const responseHeaders = new Headers(upstreamResponse.headers);
-      responseHeaders.set("Access-Control-Allow-Origin", "*");
-      responseHeaders.set("Cache-Control", "public, max-age=31536000, immutable");
-      responseHeaders.set("X-Cache-Status", "MISS-FETCHED-FROM-GITHUB");
-      responseHeaders.delete("set-cookie");
-
-      const responseToReturn = new Response(isHead ? null : upstreamResponse.body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: responseHeaders,
-      });
-
-      // Asynchronously populate Cloudflare Edge Cache
-      if (cache && ctx && typeof ctx.waitUntil === "function") {
-        ctx.waitUntil(cache.put(cacheKey, responseToReturn.clone()));
-      }
-
-      return responseToReturn;
-    }
-
-    // 2. Metadata, Static Assets, and Root Landing Page -> Proxy from GitHub Pages
-    const originUrl = new URL(metadataOrigin);
-    const targetPath = (pathname === "/" || pathname === "") ? "/index.html" : pathname;
-    const upstreamPath = originUrl.pathname.replace(/\/$/, "") + targetPath;
-    const upstreamMetaUrl = new URL(upstreamPath, originUrl.origin);
-    upstreamMetaUrl.search = url.search;
-
-    const proxyRequest = new Request(upstreamMetaUrl.toString(), {
-      method: request.method,
-      headers: request.headers,
-    });
-
-    const metaResponse = await fetch(proxyRequest);
-
-    const metaHeaders = new Headers(metaResponse.headers);
-    metaHeaders.set("Access-Control-Allow-Origin", "*");
-
-    // Tiered edge cache headers based on asset sensitivity
-    if (targetPath.includes("InRelease") || targetPath.includes("Release") || targetPath.includes("repomd.xml")) {
-      metaHeaders.set("Cache-Control", "public, max-age=300, s-maxage=300"); // 5 min for repo indexes
-    } else if (targetPath.endsWith(".asc") || targetPath.endsWith(".gpg")) {
-      metaHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=86400"); // 24 hours for signing keys
-    } else if (targetPath.endsWith(".html") || targetPath.endsWith(".sh") || targetPath.endsWith(".repo")) {
-      metaHeaders.set("Cache-Control", "public, max-age=600, s-maxage=600"); // 10 min for html/config/installer
-    }
-
-    return new Response(metaResponse.body, {
-      status: metaResponse.status,
-      statusText: metaResponse.statusText,
-      headers: metaHeaders,
-    });
+    const { pathname } = new URL(request.url);
+    return isPackagePath(pathname)
+      ? handlePackage(request, ctx, githubRepo, pathname)
+      : handleMetadata(request, metadataOrigin, pathname);
   },
 };
