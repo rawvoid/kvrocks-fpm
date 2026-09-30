@@ -7,7 +7,7 @@
  *    - Fetches the package from GitHub Releases and stream-proxies (200 OK) directly to the client.
  *    - Caches packages in Cloudflare's Edge Cache for 1 year (immutable).
  *    - Eliminates Great Firewall (GFW) blocking/throttling for clients in mainland China.
- *    - Supports HEAD requests and optional ?redirect=1 for direct HTTP 302 redirects.
+ *    - Supports HEAD requests.
  *
  * 2. Repository Metadata, Static Assets & Root Landing Page (index.html, InRelease, repomd.xml, *.repo, *.asc, install.sh):
  *    - Proxies directly from GitHub Pages (configured via METADATA_ORIGIN).
@@ -83,11 +83,6 @@ export default {
             headers: hitHeaders,
           });
         }
-      }
-
-      // Direct 302 redirect mode if explicitly requested (e.g. ?redirect=1)
-      if (url.searchParams.get("redirect") === "1" || url.searchParams.get("redirect") === "true") {
-        return Response.redirect(targetUrl, 302);
       }
 
       // Stream proxy from GitHub Releases (CF fetch automatically follows 302 to AWS S3/CloudFront)

@@ -179,17 +179,6 @@ test("worker.fetch - Static script /install.sh proxying", async () => {
   }
 });
 
-test("worker.fetch - Redirect mode (?redirect=1)", async () => {
-  const req = new Request("https://kvrocks-repo.example.com/pool/main/kvrocks_2.17.0-1_amd64.deb?redirect=1");
-  const res = await worker.fetch(req, TEST_ENV);
-
-  assert.equal(res.status, 302);
-  assert.equal(
-    res.headers.get("location"),
-    `https://github.com/${TEST_REPO}/releases/download/v2.17.0-1/kvrocks_2.17.0-1_amd64.deb`
-  );
-});
-
 test("worker.fetch - Invalid package naming returns 404", async () => {
   const req = new Request("https://kvrocks-repo.example.com/pool/main/badname.deb");
   const res = await worker.fetch(req, TEST_ENV);
