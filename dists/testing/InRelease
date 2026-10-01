@@ -1,0 +1,59 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64 arm64
+Codename: testing
+Components: main
+Date: Thu, 01 Oct 2026 15:40:08 +0000
+Description: Apache Kvrocks Debian/Ubuntu APT Repository (testing)
+Label: Kvrocks
+Origin: Apache Kvrocks Packages
+Suite: testing
+MD5Sum:
+ 0a29fd3fafc2f4656bc0dfed7f1852e9              229 Release
+ 5a9e10ea2b44ed9afc072ded0fe65be1             1353 main/binary-amd64/Packages
+ c632e94d35b034e4f6f9a8c369a2eec4              613 main/binary-amd64/Packages.gz
+ 8f0459980aab0d84617f567aa6d2914e              688 main/binary-amd64/Packages.xz
+ 086e5c0a63970f2da5811092f4d21cfa              616 main/binary-arm64/Packages
+ 3a4853877e8f457c491e8cd418729f83              453 main/binary-arm64/Packages.gz
+ 41c5ed51019209299a5bcd1a593912d6              532 main/binary-arm64/Packages.xz
+SHA1:
+ 86f396a0a3e76a76e8a7e1348087eefe3484d3dd              229 Release
+ a4e0476ea4fd49f0287e14864c94196475cf2e18             1353 main/binary-amd64/Packages
+ 5bf6d353ac46c08ee4411bba46fa8d6b499a90f9              613 main/binary-amd64/Packages.gz
+ dc24b9eda3cd003b03163de18b85343c1061eef4              688 main/binary-amd64/Packages.xz
+ b5b4929c295fca6bcd126f0dbf937a5c51fd04ac              616 main/binary-arm64/Packages
+ f932fb799546583449cdc0529f9a3ba0244a97af              453 main/binary-arm64/Packages.gz
+ 0ee8d8059732d6b258a3be2990bf237247c6bfbd              532 main/binary-arm64/Packages.xz
+SHA256:
+ a76062d07a813eedeec8b4198411e09b1bcafc3474c2db1f14fd16d938fb3a72              229 Release
+ f031356895bc91530723f9a3250057e28be3f8a22711c545caf982ecd8b8c3da             1353 main/binary-amd64/Packages
+ eb6f21fa11e25ff384ad3a3bf2cf97c71c73095da930fda807405c336a38663b              613 main/binary-amd64/Packages.gz
+ 5cbf126424940695243886a5fb553fe8fdb27fd6af8786cc8c068383da03066a              688 main/binary-amd64/Packages.xz
+ ad1f65b1cd3bcc261ff193513f924a415b59ff78133de462ef38efca0d5fb8f2              616 main/binary-arm64/Packages
+ fec1047c18262f09fecb4a6599812217175012adbfb241a8ba69295daa635008              453 main/binary-arm64/Packages.gz
+ 683d00a12f0d954d2ec1ed4f092a89ed5d4dfe5feb555bfe9dd2844f5e225100              532 main/binary-arm64/Packages.xz
+SHA512:
+ e35c748039d2c181982fbca400ec95e4343bdf7d2b464c5a82edc2bf7e51e4c8b6ee74982c10cec154307139025858b732050707466c583c1950e4fc6af47324              229 Release
+ 380a8ad57ae961f64271048e5d737ae872c35a24b96fb17c1ced1e171da83dbaf9d18d3c3ab9af58f1109dcccdd1f703cd007aaa11c634fb97c6ab67cae6155c             1353 main/binary-amd64/Packages
+ 3b7119b73182e8f8fa807487f85b7d5f9e70c194401dbfffa071c2d05df9c90cc67568aa4fe9a9c5440ad2a69527cbbe8eb3d8d6045fe948b0a7add165f36bf8              613 main/binary-amd64/Packages.gz
+ 7146182ad8cad63f64f0108d5bd00e2ed6d2103eaf2403bdefeee0f35df3de46f596964ca7189cad21800f601c719cf677a36b4de093a4c4bb10ee871b672d28              688 main/binary-amd64/Packages.xz
+ 7adb936ae7a6ae128412b618e179be3f293bc645bc1f2e877913f88e9bc90e7947203195a232090e6aef412e8e5df8d4e4b0ad10b16cbc27fe8172c5cf5c2a88              616 main/binary-arm64/Packages
+ 0ad744c0ca4d85021287353ffcd2c9bbed058c3116e300d4097c98501e8c57e48c81a21de75425fc2b7bbad3ab4e92784027b655f595c4a87196e64997686289              453 main/binary-arm64/Packages.gz
+ 49bab7e108e1dc7fdf85df3d8cf0bf2574109f4908c2ab510aabc2b0c223fcf5b63ba3f4427d4263c858f74560e814342e709bfbd75c5e4ffc351ded74d19c93              532 main/binary-arm64/Packages.xz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEXt7VJTLS7mDUScEQjzU/hn5gLLcFAmq+ftgACgkQjzU/hn5g
+LLdFBA//Ux95FGFsJM/bwqZhs51WadhQMeitjdZLDiwn3Dcd94xqtIeilJeNYMlh
+nNrEgLA2v3kwo23r0NePh/eQsfWzeJOwxfoFAHQy10j4bfExjBqTiwxYeeVFGvOq
+eDFbDLXWkO1eZgojlFT4bBVCFa5EhI9QzcVi8UWld9Uzxk2v02Wj8yAQ4AHQiNJO
+qwXWQpOeqongJHgfQTL/avlOswyv6/eMYP3+EGViYpsjAiinE/+gfE57/EF4bMTU
+QTXrbGNtBmQu2xx9PQEBZFrVbCIbpk+qFFAc2V/1GCIogL08QpMIqpScdsSSlcpE
+Zy7GT1Nfbt1YiZBp81TTDsI/dbvJl2HpQzXxD9HZGLpbcuc3fPmU6DWoujh6seBt
+cVmI2hB9TsC+ep7rYJH1c2+GsIHefH5l3iBvo0eigH1EZve5mHBokFLfplX2kX7T
+VdeiRntqX4q7Kh7YL1s7iAjgeAXB538Ra3NeT5nvQx1OHYSWqFx/2Xes1qIGF4qR
+wzyaXHhaeYywwBQZN9/lYH30mABpHQCOr5t7YvK8BzrMjQ2XQu6blXh2L5V6Pbrj
+97a7Cxog/fAQG30PklpdwwNElDILGS9x8VXw2aean4fDpktke0QjHAJIuOp6gFxl
+TzmUi+PecKZjLrQWNOIn7ffOhPGejUQzwQgt/hAFkevLhyGbe1E=
+=Zrxi
+-----END PGP SIGNATURE-----
