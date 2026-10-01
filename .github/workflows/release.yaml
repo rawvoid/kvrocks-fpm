@@ -59,23 +59,45 @@ jobs:
           version="${INPUT_VERSION#v}"
           iteration="$INPUT_ITERATION"
 
-          if [[ ! "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.-]+))?$ ]]; then
-            echo "::error::Version must look like 2.15.0 or 2.15.0-rc1, got '${version}'"
+          # 1. Extract base version and prerelease suffix via pure parameter expansion
+          #    to eliminate fragile BASH_REMATCH global state dependencies.
+          base_version="${version%%-*}"
+          if [[ "$version" == *-* ]]; then
+            prerelease="${version#*-}"
+            if [ -z "$prerelease" ]; then
+              echo "::error::Prerelease suffix cannot be empty in '${version}'"
+              exit 1
+            fi
+          else
+            prerelease=""
+          fi
+
+          # 2. Validate SemVer core triplet (X.Y.Z)
+          if [[ ! "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Base version must look like 2.15.0, got '${base_version}'"
             exit 1
           fi
-          if [[ ! "$iteration" =~ ^[0-9]+$ ]]; then
+
+          # 3. Validate prerelease suffix characters
+          if [[ -n "$prerelease" && ! "$prerelease" =~ ^[0-9A-Za-z.-]+$ ]]; then
+            echo "::error::Prerelease suffix contains invalid characters: '${prerelease}'"
+            exit 1
+          fi
+
+          # 4. Validate package iteration (strictly positive integer)
+          if [[ ! "$iteration" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::Iteration must be a positive integer, got '${iteration}'"
             exit 1
           fi
 
-          core="${BASH_REMATCH[1]}"
-          prerelease="${BASH_REMATCH[3]}"
+          # 5. Derive release channel and package version
+          #    APT and DNF sort pre-releases below GA using the `~` separator
           if [ -n "$prerelease" ]; then
             channel=testing
-            pkg_version="${core}~${prerelease}"
+            pkg_version="${base_version}~${prerelease}"
           else
             channel=stable
-            pkg_version="$core"
+            pkg_version="$base_version"
           fi
 
           {
