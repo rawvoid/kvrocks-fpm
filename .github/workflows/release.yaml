@@ -7,6 +7,7 @@ env:
   # fpm is pinned for reproducible packages (setup-fpm actions provision the unrelated Fortran Package Manager)
   FPM_VERSION: "1.18.0"
   GH_REPO: ${{ github.repository }}
+  UPSTREAM_REPO: "https://github.com/apache/kvrocks.git"
 
 # `shell: bash` (unlike the implicit `bash -e`) also enables `pipefail`.
 defaults:
@@ -108,6 +109,27 @@ jobs:
             echo "release_tag=v${version}-${iteration}"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Validate Upstream Release Tag
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          upstream_tag="v${VERSION}"
+          echo "Checking whether upstream release tag '${upstream_tag}' exists in ${UPSTREAM_REPO}..."
+
+          status=0
+          git ls-remote --exit-code --tags "$UPSTREAM_REPO" "refs/tags/${upstream_tag}" > /dev/null 2>&1 || status=$?
+
+          if [ "$status" -ne 0 ]; then
+            if [ "$status" -eq 2 ]; then
+              echo "::error::Upstream release tag '${upstream_tag}' does not exist in ${UPSTREAM_REPO}. Please ensure Apache Kvrocks has officially released or tagged this version."
+            else
+              echo "::error::Failed to query upstream repository ${UPSTREAM_REPO} (git exit code ${status})."
+            fi
+            exit 1
+          fi
+
+          echo "Upstream release tag '${upstream_tag}' verified successfully."
+
       - name: Check Publishing Preconditions
         if: ${{ !inputs.dry_run }}
         env:
@@ -118,6 +140,11 @@ jobs:
         run: |
           : "${GATEWAY_URL:?Repository variable KVROCKS_GATEWAY_URL must be set}"
           : "${GPG_PRIVATE_KEY:?Secret GPG_PRIVATE_KEY must be set}"
+
+          if [[ ! "$GATEWAY_URL" =~ ^https://[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]]; then
+            echo "::error::KVROCKS_GATEWAY_URL must be a valid HTTPS origin without path or trailing slash (e.g. 'https://repo.example.com')"
+            exit 1
+          fi
 
           # Re-releasing a published version-iteration poisons CDN caches and client APT/DNF state.
           # A leftover draft from a failed run is also rejected: delete it before retrying.
@@ -212,7 +239,7 @@ jobs:
           CCACHE_MAXSIZE: 2G
         run: |
           ccache -z
-          git clone --depth 1 --branch "v${VERSION}" https://github.com/apache/kvrocks.git
+          git clone --depth 1 --branch "v${VERSION}" "$UPSTREAM_REPO"
           cd kvrocks
           ./x.py build \
             -DCMAKE_BUILD_TYPE=Release \
