@@ -179,6 +179,8 @@ jobs:
       DEB_ARCH: ${{ matrix.arch }}
       RPM_ARCH: ${{ matrix.rpm_arch }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 4G
     strategy:
       fail-fast: false
       matrix:
@@ -225,11 +227,12 @@ jobs:
           sudo gem install --no-document fpm -v "$FPM_VERSION"
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ccache
-          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}
+          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}
           restore-keys: |
+            ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
 
       - name: Build Kvrocks
@@ -237,7 +240,6 @@ jobs:
           # -g emits DWARF symbols that are split into the debuginfo archive afterwards
           CFLAGS: -g ${{ matrix.extra_flags }} -Wno-deprecated-declarations
           CXXFLAGS: -g ${{ matrix.extra_flags }} -Wno-deprecated-declarations
-          CCACHE_MAXSIZE: 2G
         run: |
           ccache -z
           git clone --depth 1 --branch "v${VERSION}" "$UPSTREAM_REPO"
@@ -249,7 +251,13 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" \
             -DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON \
             -j "$(nproc)"
-          ccache -s
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Compilation Cache Statistics (${DEB_ARCH}, ${{ matrix.cpu_target }})
+          \`\`\`
+          $(ccache -s)
+          \`\`\`
+          EOF
 
       - name: Verify Binary Portability
         env:
