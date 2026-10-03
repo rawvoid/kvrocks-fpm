@@ -34,7 +34,7 @@ on:
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # Draft releases are only visible to tokens with write access.
     permissions:
       contents: write
@@ -219,8 +219,9 @@ jobs:
       - name: Install Dependencies & FPM
         run: |
           sudo apt-get update
-          sudo apt-get install -y git build-essential cmake libtool python3 \
-                                  ruby ruby-dev rpm libssl-dev ccache binutils
+          sudo apt-get install -y --no-install-recommends \
+            git build-essential cmake libtool python3 libssl-dev \
+            ccache pigz rpm ruby-dev binutils
           sudo gem install --no-document fpm -v "$FPM_VERSION"
 
       - name: Restore ccache
@@ -234,8 +235,8 @@ jobs:
       - name: Build Kvrocks
         env:
           # -g emits DWARF symbols that are split into the debuginfo archive afterwards
-          CFLAGS: -g ${{ matrix.extra_flags }}
-          CXXFLAGS: -g ${{ matrix.extra_flags }}
+          CFLAGS: -g ${{ matrix.extra_flags }} -Wno-deprecated-declarations
+          CXXFLAGS: -g ${{ matrix.extra_flags }} -Wno-deprecated-declarations
           CCACHE_MAXSIZE: 2G
         run: |
           ccache -z
@@ -296,16 +297,18 @@ jobs:
               echo "::error::${bin}.debug has no .debug_info, DWARF generation failed!"
               exit 1
             fi
-            bin_id=$(readelf -n "$path" | awk '/Build ID:/{print $3}')
-            debug_id=$(readelf -n "${path}.debug" | awk '/Build ID:/{print $3}')
+            bin_id=$(readelf -n "$path" 2>/dev/null | awk '/Build ID:/{print $3}')
+            debug_id=$(readelf -n "${path}.debug" 2>/dev/null | awk '/Build ID:/{print $3}')
             if [ -z "$bin_id" ] || [ "$bin_id" != "$debug_id" ]; then
               echo "::error::Build ID mismatch for ${bin}: binary '${bin_id}' != debug '${debug_id}'"
+              readelf -n "$path" || true
+              readelf -n "${path}.debug" || true
               exit 1
             fi
             echo "${bin}: Build ID ${bin_id}"
           done
 
-          tar -czf "$debuginfo" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
+          tar -I pigz -cf "$debuginfo" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
           ls -lh "$debuginfo" kvrocks/build/kvrocks kvrocks/build/kvrocks2redis
 
       - name: Prepare Packaging RootFS
@@ -423,7 +426,7 @@ jobs:
     name: Publish Release & Repositories
     needs: [preflight, build-and-package]
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     # Serialize all gh-pages writers (this job and pages.yaml)
@@ -467,7 +470,7 @@ jobs:
           default-cache-ttl 3600
           max-cache-ttl 7200
           EOF
-          printf 'batch\npinentry-mode loopback\n' > ~/.gnupg/gpg.conf
+          printf 'batch\nno-tty\npinentry-mode loopback\n' > ~/.gnupg/gpg.conf
 
           gpg --import <<<"$GPG_PRIVATE_KEY"
           mapfile -t fingerprints < <(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/{want=1} /^fpr:/&&want{print $10; want=0}')
