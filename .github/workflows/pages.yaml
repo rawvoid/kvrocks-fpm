@@ -27,12 +27,12 @@ jobs:
 
     steps:
       - name: Checkout Main Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: main-repo
 
       - name: Checkout GitHub Pages Branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: gh-pages-branch

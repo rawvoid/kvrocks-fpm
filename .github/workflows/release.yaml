@@ -45,7 +45,7 @@ jobs:
       channel: ${{ steps.resolve.outputs.channel }}
       release_tag: ${{ steps.resolve.outputs.release_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Version resolution:
       #   version       upstream version, release tag (v<version>-<iteration>), asset filenames (2.15.0-rc1)
@@ -214,7 +214,7 @@ jobs:
             rpm_extra_args: ""
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Dependencies & FPM
         run: |
@@ -440,11 +440,11 @@ jobs:
       GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The gh-pages branch must already exist; it is only ever appended to, never rebuilt.
       - name: Checkout GitHub Pages Branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: pages
