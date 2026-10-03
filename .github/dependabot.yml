@@ -1,0 +1,9 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "cron"
+      cronjob: "0 10 * * *"
+      timezone: "Etc/GMT-8"
+    open-pull-requests-limit: 100
