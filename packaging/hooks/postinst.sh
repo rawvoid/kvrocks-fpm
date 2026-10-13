@@ -13,20 +13,22 @@ esac
 
 # Create kvrocks group if it doesn't exist
 if ! getent group kvrocks >/dev/null 2>&1; then
-    groupadd -r kvrocks >/dev/null 2>&1 || true
+    groupadd -r kvrocks
 fi
 
 # Create kvrocks user if it doesn't exist
 if ! getent passwd kvrocks >/dev/null 2>&1; then
     nologin_bin="$(command -v nologin 2>/dev/null || echo '/usr/sbin/nologin')"
     [ -x "$nologin_bin" ] || nologin_bin="/bin/false"
-    useradd -r -M -g kvrocks -d /var/lib/kvrocks -s "$nologin_bin" -c "Kvrocks Server" kvrocks >/dev/null 2>&1 || true
+    useradd -r -M -g kvrocks -d /var/lib/kvrocks -s "$nologin_bin" -c "Kvrocks Server" kvrocks
 fi
 
 # Create directories and set permissions
 mkdir -p /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks
-chown kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks 2>/dev/null || true
-chmod 750 /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks 2>/dev/null || true
+chown kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks
+chmod 750 /var/lib/kvrocks /var/log/kvrocks
+chown root:kvrocks /etc/kvrocks
+chmod 775 /etc/kvrocks
 
 # Secure configuration file and allow CONFIG REWRITE by kvrocks user.
 # Refuse symlinks to prevent privilege escalation attacks during package upgrades.
