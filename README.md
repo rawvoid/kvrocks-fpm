@@ -139,7 +139,8 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
   # Build and publish RC/pre-release (automatically published as GitHub Pre-release and Testing channel)
   gh workflow run release.yaml -f version=2.15.0-rc1 -f iteration=1
 
-  # Dry-run: build packages and merge APT/RPM indexes, without signing or pushing
+  # Dry-run: build packages and merge APT/RPM indexes, without signing or pushing.
+  # The version-iteration must not already have a GitHub Release or git tag.
   gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f dry_run=true
   ```
 

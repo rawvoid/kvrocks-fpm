@@ -131,24 +131,14 @@ jobs:
 
           echo "Upstream release tag '${upstream_tag}' verified successfully."
 
-      - name: Check Publishing Preconditions
-        if: ${{ !inputs.dry_run }}
+      - name: Check Version Is Unpublished
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
-          GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
-          : "${GATEWAY_URL:?Repository variable KVROCKS_GATEWAY_URL must be set}"
-          : "${GPG_PRIVATE_KEY:?Secret GPG_PRIVATE_KEY must be set}"
-
-          if [[ ! "$GATEWAY_URL" =~ ^https://[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]]; then
-            echo "::error::KVROCKS_GATEWAY_URL must be a valid HTTPS origin without path or trailing slash (e.g. 'https://repo.example.com')"
-            exit 1
-          fi
-
           # Re-releasing a published version-iteration poisons CDN caches and client APT/DNF state.
           # A leftover draft from a failed run is also rejected: delete it before retrying.
+          # This runs for dry_run too, so an already published iteration fails before the build.
           if release=$(gh release view "$RELEASE_TAG" 2>&1); then
             echo "::error::Release ${RELEASE_TAG} already exists (published or draft). Bump the iteration or delete the stale draft."
             exit 1
@@ -160,6 +150,20 @@ jobs:
           tag=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")
           if [ -n "$tag" ]; then
             echo "::error::Git tag ${RELEASE_TAG} already exists. Bump the iteration."
+            exit 1
+          fi
+
+      - name: Check Publishing Preconditions
+        if: ${{ !inputs.dry_run }}
+        env:
+          GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          : "${GATEWAY_URL:?Repository variable KVROCKS_GATEWAY_URL must be set}"
+          : "${GPG_PRIVATE_KEY:?Secret GPG_PRIVATE_KEY must be set}"
+
+          if [[ ! "$GATEWAY_URL" =~ ^https://[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]]; then
+            echo "::error::KVROCKS_GATEWAY_URL must be a valid HTTPS origin without path or trailing slash (e.g. 'https://repo.example.com')"
             exit 1
           fi
 
@@ -266,8 +270,10 @@ jobs:
           MAX_GLIBC_ALLOWED: "2.35"
           CPU_TARGET: ${{ matrix.cpu_target }}
         run: |
-          # AVX/AVX2 uses %ymm. BMI2 mnemonics are rejected in the legacy build.
-          forbidden_re='%ymm|%zmm|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext)\>'
+          # AVX/AVX2 uses %ymm. AT&T disassembly spells BMI2 as rorxl/rorxq and the like.
+          # grep must read the whole objdump stream: grep -q closes the pipe early and
+          # objdump then dies with SIGPIPE (141), which pipefail treats as failure.
+          forbidden_re='%ymm|%zmm|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext)[lq]?\>'
           highest_glibc=""
 
           for binary in kvrocks/build/kvrocks kvrocks/build/kvrocks2redis; do
@@ -290,13 +296,13 @@ jobs:
 
             case "$CPU_TARGET" in
               legacy)
-                if objdump -d "$binary" | grep -E -q "$forbidden_re"; then
+                if objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" >/dev/null; then
                   echo "::error::${binary} contains AVX2/BMI2 instructions, but this is the legacy x86-64-v1 package"
                   exit 1
                 fi
                 ;;
               v3)
-                if [ "$(basename "$binary")" = "kvrocks" ] && ! objdump -d "$binary" | grep -E -q '%ymm'; then
+                if [ "$(basename "$binary")" = "kvrocks" ] && ! objdump -d --no-show-raw-insn "$binary" | grep -E '%ymm' >/dev/null; then
                   echo "::error::${binary} has no AVX (%ymm) instructions; x86-64-v3 flags did not reach the linked binary"
                   exit 1
                 fi
@@ -646,6 +652,10 @@ jobs:
 
             rm -rf "${repo_dir}/repodata"
             mv "$new_repodata" "${repo_dir}/repodata"
+            if gzip -dc "${repo_dir}"/repodata/*-primary.xml.gz | grep -F 'xml:base=' >/dev/null; then
+              echo "::error::${repo_dir} primary.xml contains xml:base; locations must be filenames only"
+              exit 1
+            fi
           done
 
       - name: Sign RPM Repository Metadata
