@@ -139,11 +139,12 @@ jobs:
           # Re-releasing a published version-iteration poisons CDN caches and client APT/DNF state.
           # A leftover draft from a failed run is also rejected: delete it before retrying.
           # This runs for dry_run too, so an already published iteration fails before the build.
-          if release=$(gh release view "$RELEASE_TAG" 2>&1); then
+          release_output=""
+          if release_output=$(gh release view "$RELEASE_TAG" 2>&1); then
             echo "::error::Release ${RELEASE_TAG} already exists (published or draft). Bump the iteration or delete the stale draft."
             exit 1
-          elif [[ "$release" != *"release not found"* ]]; then
-            echo "::error::Could not query release ${RELEASE_TAG}: ${release}"
+          elif ! grep -iqE "not found|could not find|404" <<<"$release_output"; then
+            echo "::error::Could not query release ${RELEASE_TAG}: ${release_output}"
             exit 1
           fi
 
@@ -158,6 +159,7 @@ jobs:
         env:
           GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           : "${GATEWAY_URL:?Repository variable KVROCKS_GATEWAY_URL must be set}"
           : "${GPG_PRIVATE_KEY:?Secret GPG_PRIVATE_KEY must be set}"
@@ -165,6 +167,18 @@ jobs:
           if [[ ! "$GATEWAY_URL" =~ ^https://[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]]; then
             echo "::error::KVROCKS_GATEWAY_URL must be a valid HTTPS origin without path or trailing slash (e.g. 'https://repo.example.com')"
             exit 1
+          fi
+
+          # Fail-fast: Verify GPG key can be imported and passphrase is valid
+          if ! gpg --batch --import <<<"$GPG_PRIVATE_KEY" 2>/dev/null; then
+            echo "::error::GPG_PRIVATE_KEY cannot be parsed by GPG"
+            exit 1
+          fi
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            if ! printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -sbo /dev/null /dev/null 2>/dev/null; then
+              echo "::error::GPG_PASSPHRASE failed to unlock GPG_PRIVATE_KEY"
+              exit 1
+            fi
           fi
 
   test:
@@ -187,7 +201,7 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_MAXSIZE: 4G
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           # Modern CPU optimized x86-64-v3 build (AVX, AVX2, BMI1/2, FMA, PCLMUL - Default Performance package)
@@ -196,6 +210,7 @@ jobs:
             rpm_arch: x86_64
             cpu_target: v3
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
+            cmake_extra_flags: ""
             pkg_suffix: ""
             deb_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy"
             rpm_extra_args: "--conflicts kvrocks-legacy"
@@ -205,7 +220,8 @@ jobs:
             arch: amd64
             rpm_arch: x86_64
             cpu_target: legacy
-            extra_flags: "-O3"
+            extra_flags: "-march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 -O3"
+            cmake_extra_flags: "-DWITH_AVX2=OFF -DWITH_AVX512=OFF"
             pkg_suffix: "-legacy"
             deb_extra_args: "--conflicts kvrocks --replaces kvrocks"
             rpm_extra_args: "--conflicts kvrocks"
@@ -216,6 +232,7 @@ jobs:
             rpm_arch: aarch64
             cpu_target: generic
             extra_flags: "-O3"
+            cmake_extra_flags: ""
             pkg_suffix: ""
             deb_extra_args: ""
             rpm_extra_args: ""
@@ -235,10 +252,12 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .ccache
-          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}
+          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
+          save-always: true
 
       - name: Build Kvrocks
         env:
@@ -246,17 +265,26 @@ jobs:
           CFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks-${{ env.VERSION }} ${{ matrix.extra_flags }} -Wno-deprecated-declarations
           CXXFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks-${{ env.VERSION }} ${{ matrix.extra_flags }} -Wno-deprecated-declarations
         run: |
+          echo "=== Initial Ccache Pool Status ==="
+          ccache -s
           ccache -z
           git clone --depth 1 --branch "v${VERSION}" "$UPSTREAM_REPO"
           cd kvrocks
+          cmake_extra=()
+          if [ -n "${{ matrix.cmake_extra_flags }}" ]; then
+            read -ra cmake_extra <<< "${{ matrix.cmake_extra_flags }}"
+          fi
           ./x.py build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto ${{ matrix.extra_flags }}" \
             -DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON \
+            "${cmake_extra[@]}" \
             -j "$(nproc)"
 
+          echo "=== Compilation Cache Statistics (${DEB_ARCH}, ${{ matrix.cpu_target }}) ==="
+          ccache -s
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ### Compilation Cache Statistics (${DEB_ARCH}, ${{ matrix.cpu_target }})
           \`\`\`
@@ -296,8 +324,10 @@ jobs:
 
             case "$CPU_TARGET" in
               legacy)
-                if objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" >/dev/null; then
-                  echo "::error::${binary} contains AVX2/BMI2 instructions, but this is the legacy x86-64-v1 package"
+                violations=$(objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" | head -n 20 || true)
+                if [ -n "$violations" ]; then
+                  echo "::error::${binary} contains AVX2/BMI2 instructions, but this is the legacy x86-64-v1 package:"
+                  echo "$violations"
                   exit 1
                 fi
                 ;;
