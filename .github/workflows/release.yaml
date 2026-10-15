@@ -548,12 +548,7 @@ jobs:
             new_index="${RUNNER_TEMP}/Packages.${arch}"
             (cd staging/deb && dpkg-scanpackages --multiversion --arch "$arch" pool/main) > "$new_index"
 
-            # A channel/arch without a Packages file yet is the first release of that channel
-            old_args=()
-            if [ -f "${index_dir}/Packages" ]; then
-              old_args=(--old "${index_dir}/Packages")
-            fi
-            python3 packaging/merge-deb-packages.py "${old_args[@]}" "$new_index" "${index_dir}/Packages"
+            python3 packaging/merge-deb-packages.py "$new_index" "${index_dir}/Packages"
 
             gzip -9cn "${index_dir}/Packages" > "${index_dir}/Packages.gz"
             xz -9c "${index_dir}/Packages" > "${index_dir}/Packages.xz"
