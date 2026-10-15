@@ -130,7 +130,7 @@ perf report --symfs .
 
 Packages are built and published on-demand via GitHub Actions (`workflow_dispatch`):
 
-* **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`); tick `dry_run` to only build and verify.
+* **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`); tick `dry_run` to build packages and merge indexes without publishing.
 * **GitHub CLI (`gh`)**:
   ```bash
   # Build and publish GA release (automatically published as Stable)
@@ -139,15 +139,15 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
   # Build and publish RC/pre-release (automatically published as GitHub Pre-release and Testing channel)
   gh workflow run release.yaml -f version=2.15.0-rc1 -f iteration=1
 
-  # Dry-run / test build only (without creating GitHub release or updating repositories)
+  # Dry-run: build packages and merge APT/RPM indexes, without signing or pushing
   gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f dry_run=true
   ```
 
-Publishing is ordered so that a failure never leaves a half-published release: the GitHub Release is created as a **draft**, the APT/RPM metadata is appended to `gh-pages`, and only then the draft is published. If a run fails midway, delete the stale draft release (and revert the `gh-pages` commit if it was already pushed) before retrying, or bump `iteration`.
+Publishing writes the indexes locally, creates a **public** GitHub Release, and only then pushes `gh-pages`. A failure while building indexes leaves no Release. If the Release is already public and the Pages push fails, delete that Release and run the workflow again. It is not referenced by the repository index yet. Rebuilding the same version produces different bytes, so the workflow rejects a Release that already exists.
 
-Repository requirements: the `gh-pages` branch must exist, repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key.
+Repository requirements: the `gh-pages` branch must exist (it can be empty of packages), repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
 
-**Pre-release versions**: `2.15.0-rc1` packages are built with internal package version `2.15.0~rc1` (the `~` ensures APT/DNF recognize that `2.15.0~rc1 < 2.15.0`, so upgrading to the GA release is seamless). External artifacts and release tags retain the standard naming (e.g. `kvrocks_2.15.0-rc1-1_amd64.deb`, tag `v2.15.0-rc1-1`).
+**Pre-release versions**: `2.15.0-rc1` packages are built with internal package version `2.15.0~rc1` (the `~` ensures APT/DNF recognize that `2.15.0~rc1 < 2.15.0`, so upgrading to the GA release is seamless when both versions are visible to the package manager). The suffix is a single identifier such as `rc1` or `rc.1`; a hyphen is rejected because RPM `Version` cannot contain `-`. External artifacts and release tags retain the standard naming (e.g. `kvrocks_2.15.0-rc1-1_amd64.deb`, tag `v2.15.0-rc1-1`).
 
 ---
 

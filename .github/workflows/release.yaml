@@ -27,7 +27,7 @@ on:
         required: true
         default: '1'
       dry_run:
-        description: 'Dry run: build and verify the packages only, publish nothing'
+        description: 'Dry run: build packages and merge repository indexes locally, publish nothing'
         type: boolean
         default: false
 
@@ -79,9 +79,10 @@ jobs:
             exit 1
           fi
 
-          # 3. Validate prerelease suffix characters
-          if [[ -n "$prerelease" && ! "$prerelease" =~ ^[0-9A-Za-z.-]+$ ]]; then
-            echo "::error::Prerelease suffix contains invalid characters: '${prerelease}'"
+          # 3. Validate prerelease suffix. RPM Version cannot contain '-'.
+          #    rc1 and rc.1 are accepted; rc-1 is rejected.
+          if [[ -n "$prerelease" && ! "$prerelease" =~ ^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
+            echo "::error::Prerelease suffix must look like rc1 or rc.1, got '${prerelease}'"
             exit 1
           fi
 
@@ -202,8 +203,8 @@ jobs:
             cpu_target: legacy
             extra_flags: "-O3"
             pkg_suffix: "-legacy"
-            deb_extra_args: "--provides kvrocks --conflicts kvrocks --replaces kvrocks"
-            rpm_extra_args: "--provides kvrocks --conflicts kvrocks"
+            deb_extra_args: "--conflicts kvrocks --replaces kvrocks"
+            rpm_extra_args: "--conflicts kvrocks"
 
           # ARM64 / aarch64 build
           - os: ubuntu-22.04-arm
@@ -238,8 +239,8 @@ jobs:
       - name: Build Kvrocks
         env:
           # -g emits DWARF symbols that are split into the debuginfo archive afterwards
-          CFLAGS: -g ${{ matrix.extra_flags }} -Wno-deprecated-declarations
-          CXXFLAGS: -g ${{ matrix.extra_flags }} -Wno-deprecated-declarations
+          CFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks-${{ env.VERSION }} ${{ matrix.extra_flags }} -Wno-deprecated-declarations
+          CXXFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks-${{ env.VERSION }} ${{ matrix.extra_flags }} -Wno-deprecated-declarations
         run: |
           ccache -z
           git clone --depth 1 --branch "v${VERSION}" "$UPSTREAM_REPO"
@@ -248,7 +249,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -flto=auto ${{ matrix.extra_flags }}" \
             -DPORTABLE=1 -DENABLE_OPENSSL=ON -DENABLE_LTO=ON \
             -j "$(nproc)"
 
@@ -263,29 +264,50 @@ jobs:
         env:
           # Must match the glibc requirement enforced by scripts/install.sh
           MAX_GLIBC_ALLOWED: "2.35"
+          CPU_TARGET: ${{ matrix.cpu_target }}
         run: |
-          binary=kvrocks/build/kvrocks
+          # AVX/AVX2 uses %ymm. BMI2 mnemonics are rejected in the legacy build.
+          forbidden_re='%ymm|%zmm|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext)\>'
+          highest_glibc=""
 
-          needed=$(readelf -d "$binary" | grep NEEDED)
-          echo "=== Shared library dependencies ==="
-          echo "$needed"
-          if grep -qF 'libstdc++' <<<"$needed"; then
-            echo "::error::libstdc++ is dynamically linked, the binary is not portable!"
-            exit 1
-          fi
+          for binary in kvrocks/build/kvrocks kvrocks/build/kvrocks2redis; do
+            needed=$(readelf -d "$binary" | grep NEEDED)
+            echo "=== ${binary} shared library dependencies ==="
+            echo "$needed"
+            if grep -qE 'libstdc\+\+|libgcc_s' <<<"$needed"; then
+              echo "::error::${binary} dynamically links libstdc++ or libgcc_s"
+              exit 1
+            fi
 
-          max_glibc=$(objdump -T "$binary" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)
-          max_glibc="${max_glibc#GLIBC_}"
-          echo "Highest GLIBC symbol required: ${max_glibc}"
-          if [ "$(printf '%s\n' "$max_glibc" "$MAX_GLIBC_ALLOWED" | sort -V | tail -n 1)" != "$MAX_GLIBC_ALLOWED" ]; then
-            echo "::error::Binary requires glibc ${max_glibc}, but packages promise compatibility with glibc >= ${MAX_GLIBC_ALLOWED}!"
-            exit 1
-          fi
+            max_glibc=$(objdump -T "$binary" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)
+            max_glibc="${max_glibc#GLIBC_}"
+            echo "${binary}: highest GLIBC symbol required: ${max_glibc}"
+            if [ "$(printf '%s\n' "$max_glibc" "$MAX_GLIBC_ALLOWED" | sort -V | tail -n 1)" != "$MAX_GLIBC_ALLOWED" ]; then
+              echo "::error::${binary} requires glibc ${max_glibc}, but packages promise compatibility with glibc >= ${MAX_GLIBC_ALLOWED}"
+              exit 1
+            fi
+            highest_glibc="$max_glibc"
+
+            case "$CPU_TARGET" in
+              legacy)
+                if objdump -d "$binary" | grep -E -q "$forbidden_re"; then
+                  echo "::error::${binary} contains AVX2/BMI2 instructions, but this is the legacy x86-64-v1 package"
+                  exit 1
+                fi
+                ;;
+              v3)
+                if [ "$(basename "$binary")" = "kvrocks" ] && ! objdump -d "$binary" | grep -E -q '%ymm'; then
+                  echo "::error::${binary} has no AVX (%ymm) instructions; x86-64-v3 flags did not reach the linked binary"
+                  exit 1
+                fi
+                ;;
+            esac
+          done
 
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
-          ### Binary Portability (${DEB_ARCH}, ${{ matrix.cpu_target }})
-          - Highest GLIBC symbol required: \`${max_glibc}\` (limit \`${MAX_GLIBC_ALLOWED}\`)
-          - libstdc++ statically linked
+          ### Binary Portability (${DEB_ARCH}, ${CPU_TARGET})
+          - kvrocks and kvrocks2redis stay within glibc \`${MAX_GLIBC_ALLOWED}\` (last seen \`${highest_glibc}\`)
+          - libstdc++ and libgcc_s are statically linked
           EOF
 
       - name: Separate Debug Symbols & Strip Binaries
@@ -328,6 +350,8 @@ jobs:
           # Configuration with FHS paths and native log retention
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
           python3 packaging/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
+          chmod 0640 rootfs/etc/kvrocks/kvrocks.conf
+          chmod 0775 rootfs/etc/kvrocks
 
           # License, notice and pristine upstream configuration references
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
@@ -351,7 +375,7 @@ jobs:
             --daemonize no &
           pid=$!
           # The server is either already gone (failed start) or still serving when the step ends
-          trap 'kill "$pid" 2>/dev/null || true; rm -rf "$workdir"' EXIT
+          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; rm -rf "$workdir"' EXIT
 
           for _ in $(seq 30); do
             if ! kill -0 "$pid" 2>/dev/null; then
@@ -377,6 +401,10 @@ jobs:
         run: |
           read -ra deb_extra <<<"$DEB_EXTRA_ARGS"
           read -ra rpm_extra <<<"$RPM_EXTRA_ARGS"
+          if [ "$PKG_NAME" = "kvrocks-legacy" ]; then
+            deb_extra+=(--provides "kvrocks (= ${PKG_VERSION}-${ITERATION})")
+            rpm_extra+=(--provides "kvrocks = ${PKG_VERSION}-${ITERATION}")
+          fi
 
           common=(
             -s dir -C rootfs
@@ -394,12 +422,14 @@ jobs:
           )
 
           fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
+            -d 'libc6 (>= 2.35)' \
             -d libssl3 \
             --deb-user root --deb-group root \
             "${deb_extra[@]}" \
             -p "dist/${PKG_NAME}_${VERSION}-${ITERATION}_${DEB_ARCH}.deb"
 
           fpm "${common[@]}" -t rpm -a "$RPM_ARCH" \
+            -d 'glibc >= 2.35' \
             -d 'libssl.so.3()(64bit)' \
             --rpm-digest sha256 \
             --rpm-user root --rpm-group root \
@@ -423,6 +453,35 @@ jobs:
             exit 1
           fi
 
+          deb_depends=$(dpkg-deb --field "$deb" Depends)
+          rpm_requires=$(rpm -qp --requires "$rpm")
+          if ! grep -qF "libc6 (>= 2.35)" <<<"$deb_depends"; then
+            echo "::error::DEB is missing dependency 'libc6 (>= 2.35)'"
+            echo "$deb_depends"
+            exit 1
+          fi
+          if ! grep -qF "glibc >= 2.35" <<<"$rpm_requires"; then
+            echo "::error::RPM is missing dependency 'glibc >= 2.35'"
+            echo "$rpm_requires"
+            exit 1
+          fi
+
+          deb_provides=$(dpkg-deb --field "$deb" Provides 2>/dev/null || true)
+          if [ "$PKG_NAME" = "kvrocks-legacy" ]; then
+            if [ "$deb_provides" != "kvrocks (= ${expected})" ]; then
+              echo "::error::DEB Provides mismatch: expected 'kvrocks (= ${expected})', got '${deb_provides}'"
+              exit 1
+            fi
+            if ! rpm -qp --provides "$rpm" | grep -qx "kvrocks = ${expected}"; then
+              echo "::error::RPM is missing provide 'kvrocks = ${expected}'"
+              rpm -qp --provides "$rpm"
+              exit 1
+            fi
+          elif [ -n "$deb_provides" ]; then
+            echo "::error::${PKG_NAME} should not declare Provides, got '${deb_provides}'"
+            exit 1
+          fi
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -433,7 +492,6 @@ jobs:
   publish:
     name: Publish Release & Repositories
     needs: [preflight, build-and-package]
-    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -469,6 +527,7 @@ jobs:
           sudo apt-get install -y dpkg-dev apt-utils createrepo-c rpm xz-utils
 
       - name: Import GPG Key
+        if: ${{ !inputs.dry_run }}
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
@@ -496,6 +555,7 @@ jobs:
           fi
 
       - name: Sign & Verify RPM Packages
+        if: ${{ !inputs.dry_run }}
         run: |
           cat > ~/.rpmmacros <<EOF
           %_signature gpg
@@ -518,17 +578,6 @@ jobs:
       - name: Generate Checksums
         working-directory: dist
         run: sha256sum -- *.deb *.rpm *.tar.gz | tee SHA256SUMS
-
-      # The release stays a draft (no tag, no public assets) until the repository metadata is live.
-      - name: Create Draft GitHub Release
-        env:
-          RELEASE_TITLE: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
-        run: |
-          args=(--draft --target "$GITHUB_SHA" --title "$RELEASE_TITLE" --generate-notes)
-          if [ "$CHANNEL" = testing ]; then
-            args+=(--prerelease)
-          fi
-          gh release create "$RELEASE_TAG" "${args[@]}" dist/*
 
       - name: Stage New Packages
         run: |
@@ -566,6 +615,10 @@ jobs:
             -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository (${CHANNEL})" \
             release . > Release
 
+      - name: Sign APT Repository
+        if: ${{ !inputs.dry_run }}
+        run: |
+          cd "pages/dists/${CHANNEL}"
           # Debian SecureApt standardizes on SHA512
           gpg --yes --digest-algo SHA512 --clearsign -o InRelease Release
           gpg --yes --digest-algo SHA512 -abs -o Release.gpg Release
@@ -579,24 +632,35 @@ jobs:
             new_repo="staging/rpm/${arch}"
             mkdir -p "$repo_dir"
 
-            createrepo_c --quiet "$new_repo"
+            createrepo_c --quiet --no-database "$new_repo"
             new_repodata="${new_repo}/repodata"
 
-            # A channel/arch without repodata yet is the first release of that channel
+            # A channel/arch without repodata yet is the first release of that channel.
+            # --omit-baseurl keeps <location> as a filename under the repo baseurl.
             if [ -d "${repo_dir}/repodata" ]; then
               merged_dir=$(mktemp -d)
-              mergerepo_c --all --repo "$repo_dir" --repo "$new_repo" -o "$merged_dir"
+              mergerepo_c --all --omit-baseurl --no-database \
+                --repo "$repo_dir" --repo "$new_repo" -o "$merged_dir"
               new_repodata="${merged_dir}/repodata"
             fi
 
             rm -rf "${repo_dir}/repodata"
             mv "$new_repodata" "${repo_dir}/repodata"
+          done
 
-            gpg --yes --digest-algo SHA256 --detach-sign --armor -o "${repo_dir}/repodata/repomd.xml.asc" "${repo_dir}/repodata/repomd.xml"
+      - name: Sign RPM Repository Metadata
+        if: ${{ !inputs.dry_run }}
+        run: |
+          for arch in x86_64 aarch64; do
+            repo_dir="pages/rpm/${CHANNEL}/${arch}"
+            gpg --yes --digest-algo SHA256 --detach-sign --armor \
+              -o "${repo_dir}/repodata/repomd.xml.asc" \
+              "${repo_dir}/repodata/repomd.xml"
             gpg --verify "${repo_dir}/repodata/repomd.xml.asc" "${repo_dir}/repodata/repomd.xml"
           done
 
       - name: Publish Signing Key & Repository Config
+        if: ${{ !inputs.dry_run }}
         run: |
           gpg --yes --export "$GPG_KEY_ID" > pages/kvrocks.gpg
           gpg --yes --armor --export "$GPG_KEY_ID" > pages/kvrocks.asc
@@ -613,7 +677,19 @@ jobs:
             exit 1
           fi
 
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_TITLE: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
+        run: |
+          args=(--target "$GITHUB_SHA" --title "$RELEASE_TITLE" --generate-notes)
+          if [ "$CHANNEL" = testing ]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "${args[@]}" dist/*
+
       - name: Deploy Repository Metadata to GitHub Pages
+        if: ${{ !inputs.dry_run }}
         working-directory: pages
         run: |
           git config user.name "github-actions[bot]"
@@ -622,10 +698,8 @@ jobs:
           git commit -m "release: ${RELEASE_TAG} (${CHANNEL})"
           git push origin gh-pages
 
-      - name: Publish GitHub Release
-        run: gh release edit "$RELEASE_TAG" --draft=false
-
       - name: Summary
+        if: ${{ !inputs.dry_run }}
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ### Release ${RELEASE_TAG} published (\`${CHANNEL}\` channel)
@@ -634,4 +708,13 @@ jobs:
           - **RPM**: \`${GATEWAY_URL%/}/rpm/${CHANNEL}/\$basearch/\`
           - **DNF repo config**: \`${GATEWAY_URL%/}/kvrocks.repo\`
           - **GPG public key**: \`${GATEWAY_URL%/}/kvrocks.asc\`
+          EOF
+
+      - name: Dry Run Summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ### Dry run ${RELEASE_TAG} (\`${CHANNEL}\`)
+          - Packages were built and repository indexes were merged locally.
+          - Nothing was signed, released, or pushed.
           EOF
