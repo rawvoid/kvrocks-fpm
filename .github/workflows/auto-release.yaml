@@ -1,0 +1,44 @@
+name: Auto Release
+
+# Poll apache/kvrocks tags (including release candidates, which upstream only
+# tags but never publishes as GitHub Releases) and release the oldest upstream
+# version newer than everything already published. Historical gaps are
+# intentionally not backfilled; each run advances at most one version.
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: detect and build without signing or publishing'
+        type: boolean
+        default: true
+
+jobs:
+  detect:
+    name: Detect Unpublished Upstream Version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      should_build: ${{ steps.detect.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Detect Unpublished Upstream Version
+        id: detect
+        run: python3 packaging/check-upstream.py
+
+  release:
+    name: Release Packages
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
+    # Draft releases are only visible to tokens with write access.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-pipeline.yaml
+    with:
+      version: ${{ needs.detect.outputs.version }}
+      iteration: '1'
+      # Scheduled runs carry no inputs, so the comparison defaults to false (publish).
+      dry_run: ${{ inputs.dry_run == true }}
+    secrets: inherit

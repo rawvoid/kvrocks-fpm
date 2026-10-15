@@ -128,9 +128,12 @@ perf report --symfs .
 
 ## 🛠️ Build & Release
 
-Packages are built and published on-demand via GitHub Actions (`workflow_dispatch`):
+Packages are built and published via GitHub Actions. Both entries below call the same reusable pipeline (`.github/workflows/release-pipeline.yaml`), so manual and automatic releases follow identical validation, signing, and publishing steps:
 
-* **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`); tick `dry_run` to build packages and merge indexes without publishing.
+* **Automatic upstream tracking** (`Auto Release` workflow): polls `apache/kvrocks` tags every 6 hours (`0 */6 * * *`) — including release candidates such as `v2.18.0-rc1` (upstream only publishes GA versions as GitHub Releases, so tags are the source of truth) — and releases the oldest upstream version newer than everything already published, with iteration `1`. GA versions go to the Stable channel, `rc` versions to Testing (as GitHub pre-releases). When nothing new exists, the run exits quietly. Historical gaps are intentionally not backfilled (e.g. an `rc` skipped while its GA is already out stays skipped); each run advances at most one version. Version detection lives in `packaging/check-upstream.py` (with unit tests) and can also be run locally: `python3 packaging/check-upstream.py`. The workflow can be triggered manually with an optional `dry_run` (default `true`: build without signing or publishing).
+* **Manual builds** (`Release Packages` workflow, `workflow_dispatch`):
+
+  * **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`); tick `dry_run` to build packages and merge indexes without publishing.
 * **GitHub CLI (`gh`)**:
   ```bash
   # Build and publish GA release (automatically published as Stable)
