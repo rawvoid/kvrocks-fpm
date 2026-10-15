@@ -216,11 +216,20 @@ jobs:
             rpm_extra_args: "--conflicts kvrocks-legacy"
 
           # Legacy x86-64-v1 build (Baseline compatibility for older CPUs/VMs without AVX2)
+          #
+          # Hardware Compatibility Guard Architecture:
+          # - Baseline: -march=x86-64 -mtune=generic sets base x86-64-v1 target (SSE2 only, no AVX/BMI).
+          # - Defense-in-depth: -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 strictly forbids vectorization.
+          # - zstd fix: zstd defaults DYNAMIC_BMI2=1 when !defined(__BMI2__) and decorates functions with
+          #   __attribute__((target("bmi2"))), which overrides -mno-bmi2 in GCC and generates shlx/sarx.
+          #   -DDYNAMIC_BMI2=0 disables this BMI2 function generation completely.
+          #   -DZSTD_DISABLE_ASM=1 disables hand-written x86-64 BMI2 assembly files.
+          # - zlib-ng fix: -DWITH_AVX2=OFF -DWITH_AVX512=OFF prevents CMake auto-enabling AVX2/AVX512.
           - os: ubuntu-22.04
             arch: amd64
             rpm_arch: x86_64
             cpu_target: legacy
-            extra_flags: "-march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 -O3"
+            extra_flags: "-march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 -DDYNAMIC_BMI2=0 -DZSTD_DISABLE_ASM=1 -O3"
             cmake_extra_flags: "-DWITH_AVX2=OFF -DWITH_AVX512=OFF"
             pkg_suffix: "-legacy"
             deb_extra_args: "--conflicts kvrocks --replaces kvrocks"
@@ -249,7 +258,7 @@ jobs:
           sudo gem install --no-document fpm -v "$FPM_VERSION"
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -257,7 +266,6 @@ jobs:
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
-          save-always: true
 
       - name: Build Kvrocks
         env:
@@ -524,6 +532,13 @@ jobs:
           name: packages-${{ matrix.arch }}-${{ matrix.cpu_target }}
           path: dist/
           if-no-files-found: error
+
+      - name: Save ccache
+        uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   publish:
     name: Publish Release & Repositories
