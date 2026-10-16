@@ -38,6 +38,9 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 > [!TIP]
 > **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions.
 
+> [!NOTE]
+> **System Requirements**: Requires Linux with `glibc >= 2.35` (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+). Older distributions without glibc 2.35 can run Kvrocks via Docker.
+
 ### 1. One-Click Automated Install (Debian, Ubuntu, Fedora)
 
 The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the repository, and installs the fastest compatible package variant:
@@ -50,13 +53,24 @@ curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo KVROCKS_CHANNEL=testing bash
 ```
 
-*(Note: Upgrades and flavor switches automatically restart the service if running, and preserve the inactive state if stopped.)*
+Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; failures are reported but do not by themselves abort the package transaction.
+
+Do not assume flavor switches preserve service state: APT may remove the old flavor in a separate removal step, stopping and disabling it. After switching, check `systemctl status kvrocks` and `systemctl is-enabled kvrocks`; restore only the states you previously wanted:
+
+```bash
+sudo systemctl start kvrocks   # Only if previously running
+sudo systemctl enable kvrocks  # Only if previously enabled at boot
+```
+
+To switch flavors manually via native package managers:
+- **Debian / Ubuntu**: `sudo apt install kvrocks` (or `kvrocks-legacy`)
+- **Fedora / DNF**: `sudo dnf swap kvrocks-legacy kvrocks` (or `kvrocks kvrocks-legacy`)
 
 ---
 
 ## ⚙️ Service Management
 
-The package automatically sets up the `systemd` service unit:
+The package installs the `systemd` service unit, but does **not** start or enable it on first installation:
 
 ```bash
 # Start Kvrocks
@@ -80,6 +94,8 @@ Test connection using `redis-cli`:
 redis-cli -p 6666 ping
 # PONG
 ```
+
+Removal stops and disables the service (Debian stop requests remain subject to `policy-rc.d`). Debian purge lets dpkg remove managed configuration and clears helper state only when the shared unit is no longer installed. Database files, logs, the service account, and unmanaged files under `/etc/kvrocks` are not recursively deleted.
 
 ## 🔍 Production Troubleshooting & Detached Symbol Debugging
 
@@ -124,6 +140,23 @@ perf report --symfs .
 > diff -u --color /usr/share/doc/kvrocks/kvrocks.conf.default /etc/kvrocks/kvrocks.conf
 > ```
 
+### ⚙️ Configuration Lifecycle & Upgrades (`CONFIG REWRITE` & `.rpmnew`)
+
+The active configuration file `/etc/kvrocks/kvrocks.conf` is marked as a protected configuration file (`conffile` in Debian/Ubuntu, `%config(noreplace)` in RPM/RHEL/Fedora).
+
+- **Default permissions**: The configuration is `kvrocks:kvrocks` mode `0640`; `/etc/kvrocks` is `root:kvrocks` mode `0775`, allowing same-directory file replacement for `CONFIG REWRITE`. RPM records these owner/group names in package metadata rather than repairing the active configuration in postinst. Configuration changes after `CONFIG REWRITE` can legitimately appear in `rpm -V`.
+- **Debian permission initialization**: Preinst creates the service user and group before payload extraction. Postinst initializes directory permissions (`/etc/kvrocks` as `root:kvrocks 0775`, state/log as `0750`) and configuration permissions (`kvrocks:kvrocks 0640`), strictly refusing symlinks to prevent privilege escalation.
+- **Protection Against Overwrites**: When Kvrocks executes `CONFIG REWRITE` or when you customize the configuration (e.g., setting `requirepass` or adjusting caching parameters), your active changes will **never** be silently overwritten during package upgrades.
+- **Debian / Ubuntu**: Upgrades performed via `install.sh` automatically preserve your active configuration non-interactively using dpkg's `--force-confdef --force-confold` flags. A bare `apt-get upgrade` may still present the conffile prompt; answer "keep the currently-installed version" to retain your settings.
+- **RHEL / Rocky / AlmaLinux / Fedora**: If your active configuration differs from the newly installed release defaults, RPM preserves your current `/etc/kvrocks/kvrocks.conf` and saves the maintainer's new template to `/etc/kvrocks/kvrocks.conf.rpmnew`. You can review the new directives and safely remove the `.rpmnew` file:
+  ```bash
+  # Review new upstream directives against your active configuration
+  diff -u /etc/kvrocks/kvrocks.conf /etc/kvrocks/kvrocks.conf.rpmnew
+
+  # Remove the .rpmnew file once reviewed
+  sudo rm -f /etc/kvrocks/kvrocks.conf.rpmnew
+  ```
+
 ---
 
 ## 🛠️ Build & Release
@@ -144,7 +177,7 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
   gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f dry_run=true
   ```
 
-Publishing writes the indexes locally, creates a **public** GitHub Release, and only then pushes `gh-pages`. A failure while building indexes leaves no Release. If the Release is already public and the Pages push fails, delete that Release and run the workflow again. It is not referenced by the repository index yet. Rebuilding the same version produces different bytes, so the workflow rejects a Release that already exists.
+Publishing writes the indexes locally, creates a GitHub Release, and deploys metadata to `gh-pages`. If deploying metadata fails, the workflow automatically aborts the rebase and deletes the unreferenced Release and Git tag, ensuring no split-brain state (where a release exists on GitHub but is missing from repository indexes) and allowing safe re-runs of the same version.
 
 Repository requirements: the `gh-pages` branch must exist (it can be empty of packages), repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
 

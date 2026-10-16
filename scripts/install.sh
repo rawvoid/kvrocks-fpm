@@ -344,7 +344,15 @@ EOF
             "$PKG_MGR" install -y --refresh --allowerasing "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
         else
             "$PKG_MGR" makecache || true
-            "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
+            if [ "$TARGET_PACKAGE" = "kvrocks" ] && rpm -q kvrocks-legacy >/dev/null 2>&1; then
+                info "Swapping kvrocks-legacy with kvrocks via yum..."
+                "$PKG_MGR" swap -y kvrocks-legacy kvrocks "${RPM_EXTRA_OPTS[@]}" || "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
+            elif [ "$TARGET_PACKAGE" = "kvrocks-legacy" ] && rpm -q kvrocks >/dev/null 2>&1; then
+                info "Swapping kvrocks with kvrocks-legacy via yum..."
+                "$PKG_MGR" swap -y kvrocks kvrocks-legacy "${RPM_EXTRA_OPTS[@]}" || "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
+            else
+                "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
+            fi
         fi
     fi
 

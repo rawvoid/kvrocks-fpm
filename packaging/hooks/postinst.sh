@@ -11,41 +11,40 @@ case "$1" in
         ;;
 esac
 
-# Create kvrocks group if it doesn't exist
-if ! getent group kvrocks >/dev/null 2>&1; then
-    groupadd -r kvrocks
+# Initialize service ownership for DEB (RPM uses staged package metadata)
+case "$1" in
+    ''|*[!0-9]*)
+        mkdir -p /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks
+        chown kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks
+        chmod 750 /var/lib/kvrocks /var/log/kvrocks
+        chown root:kvrocks /etc/kvrocks
+        chmod 775 /etc/kvrocks
+
+        conf=/etc/kvrocks/kvrocks.conf
+        if [ -L "$conf" ]; then
+            echo "kvrocks postinst: $conf must be a regular file, not a symlink" >&2
+            exit 1
+        elif [ -f "$conf" ]; then
+            chown kvrocks:kvrocks "$conf"
+            chmod 640 "$conf"
+        fi
+        ;;
+esac
+
+# Record systemd enablement state on Debian without starting service
+if [ "$1" = configure ]; then
+    deb-systemd-helper unmask kvrocks.service >/dev/null 2>&1 || true
+    deb-systemd-helper update-state kvrocks.service >/dev/null 2>&1 || true
 fi
 
-# Create kvrocks user if it doesn't exist
-if ! getent passwd kvrocks >/dev/null 2>&1; then
-    nologin_bin="$(command -v nologin 2>/dev/null || echo '/usr/sbin/nologin')"
-    [ -x "$nologin_bin" ] || nologin_bin="/bin/false"
-    useradd -r -M -g kvrocks -d /var/lib/kvrocks -s "$nologin_bin" -c "Kvrocks Server" kvrocks
-fi
-
-# Create directories and set permissions
-mkdir -p /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks
-chown kvrocks:kvrocks /var/lib/kvrocks /var/log/kvrocks
-chmod 750 /var/lib/kvrocks /var/log/kvrocks
-chown root:kvrocks /etc/kvrocks
-chmod 775 /etc/kvrocks
-
-# Secure configuration file and allow CONFIG REWRITE by kvrocks user.
-# Refuse symlinks to prevent privilege escalation attacks during package upgrades.
-conf=/etc/kvrocks/kvrocks.conf
-if [ -e "$conf" ] || [ -L "$conf" ]; then
-    if [ -L "$conf" ] || [ ! -f "$conf" ]; then
-        echo "kvrocks postinst: $conf must be a regular file, not a symlink" >&2
-        exit 1
-    fi
-    chown kvrocks:kvrocks "$conf"
-    chmod 640 "$conf"
-fi
-
-# Reload systemd daemon if available, and try-restart service if it was running
+# Reload systemd and try-restart if already active
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl try-restart kvrocks >/dev/null 2>&1 || true
+    if [ "$1" = configure ] && [ -n "${2:-}" ]; then
+        deb-systemd-invoke try-restart kvrocks.service >/dev/null 2>&1 || true
+    elif [ "$1" != configure ] && [ "$1" != "1" ]; then
+        systemctl try-restart kvrocks >/dev/null 2>&1 || true
+    fi
 fi
 
 exit 0

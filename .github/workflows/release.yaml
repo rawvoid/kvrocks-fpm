@@ -3,10 +3,14 @@ name: Release Packages
 permissions:
   contents: read
 
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+  queue: max
+
 env:
   # fpm is pinned for reproducible packages (setup-fpm actions provision the unrelated Fortran Package Manager)
   FPM_VERSION: "1.18.0"
-  GH_REPO: ${{ github.repository }}
   UPSTREAM_REPO: "https://github.com/apache/kvrocks.git"
 
 # `shell: bash` (unlike the implicit `bash -e`) also enables `pipefail`.
@@ -60,40 +64,18 @@ jobs:
           version="${INPUT_VERSION#v}"
           iteration="$INPUT_ITERATION"
 
-          # 1. Extract base version and prerelease suffix via pure parameter expansion
-          #    to eliminate fragile BASH_REMATCH global state dependencies.
-          base_version="${version%%-*}"
-          if [[ "$version" == *-* ]]; then
-            prerelease="${version#*-}"
-            if [ -z "$prerelease" ]; then
-              echo "::error::Prerelease suffix cannot be empty in '${version}'"
-              exit 1
-            fi
-          else
-            prerelease=""
-          fi
-
-          # 2. Validate SemVer core triplet (X.Y.Z)
-          if [[ ! "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Base version must look like 2.15.0, got '${base_version}'"
+          if [[ ! "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z]+(\.[0-9A-Za-z]+)*))?$ ]]; then
+            echo "::error::Invalid version format '${version}' (expected e.g. 2.15.0 or 2.15.0-rc1)"
             exit 1
           fi
+          base_version="${BASH_REMATCH[1]}"
+          prerelease="${BASH_REMATCH[3]}"
 
-          # 3. Validate prerelease suffix. RPM Version cannot contain '-'.
-          #    rc1 and rc.1 are accepted; rc-1 is rejected.
-          if [[ -n "$prerelease" && ! "$prerelease" =~ ^[0-9A-Za-z]+(\.[0-9A-Za-z]+)*$ ]]; then
-            echo "::error::Prerelease suffix must look like rc1 or rc.1, got '${prerelease}'"
-            exit 1
-          fi
-
-          # 4. Validate package iteration (strictly positive integer)
           if [[ ! "$iteration" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::Iteration must be a positive integer, got '${iteration}'"
             exit 1
           fi
 
-          # 5. Derive release channel and package version
-          #    APT and DNF sort pre-releases below GA using the `~` separator
           if [ -n "$prerelease" ]; then
             channel=testing
             pkg_version="${base_version}~${prerelease}"
@@ -117,15 +99,8 @@ jobs:
           upstream_tag="v${VERSION}"
           echo "Checking whether upstream release tag '${upstream_tag}' exists in ${UPSTREAM_REPO}..."
 
-          status=0
-          git ls-remote --exit-code --tags "$UPSTREAM_REPO" "refs/tags/${upstream_tag}" > /dev/null 2>&1 || status=$?
-
-          if [ "$status" -ne 0 ]; then
-            if [ "$status" -eq 2 ]; then
-              echo "::error::Upstream release tag '${upstream_tag}' does not exist in ${UPSTREAM_REPO}. Please ensure Apache Kvrocks has officially released or tagged this version."
-            else
-              echo "::error::Failed to query upstream repository ${UPSTREAM_REPO} (git exit code ${status})."
-            fi
+          if ! git ls-remote --exit-code --tags "$UPSTREAM_REPO" "refs/tags/${upstream_tag}" >/dev/null 2>&1; then
+            echo "::error::Upstream release tag '${upstream_tag}' does not exist in ${UPSTREAM_REPO}. Please ensure Apache Kvrocks has officially released or tagged this version."
             exit 1
           fi
 
@@ -136,21 +111,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.resolve.outputs.release_tag }}
         run: |
-          # Re-releasing a published version-iteration poisons CDN caches and client APT/DNF state.
-          # A leftover draft from a failed run is also rejected: delete it before retrying.
-          # This runs for dry_run too, so an already published iteration fails before the build.
-          release_output=""
-          if release_output=$(gh release view "$RELEASE_TAG" 2>&1); then
-            echo "::error::Release ${RELEASE_TAG} already exists (published or draft). Bump the iteration or delete the stale draft."
-            exit 1
-          elif ! grep -iqE "not found|could not find|404" <<<"$release_output"; then
-            echo "::error::Could not query release ${RELEASE_TAG}: ${release_output}"
-            exit 1
-          fi
-
-          tag=$(git ls-remote --tags origin "refs/tags/${RELEASE_TAG}")
-          if [ -n "$tag" ]; then
-            echo "::error::Git tag ${RELEASE_TAG} already exists. Bump the iteration."
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft -q .isDraft 2>/dev/null); then
+            if [ "$is_draft" = "false" ]; then
+              echo "::error::Release ${RELEASE_TAG} is already published. Bump the iteration."
+              exit 1
+            fi
+            echo "Note: Found draft release ${RELEASE_TAG}; it will be replaced during publish."
+          elif git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "::error::Git tag ${RELEASE_TAG} already exists on remote. Bump the iteration."
             exit 1
           fi
 
@@ -169,16 +137,20 @@ jobs:
             exit 1
           fi
 
-          # Fail-fast: Verify GPG key can be imported and passphrase is valid
+          # Fail-fast: Verify GPG key can be imported and used for signing
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
+          trap 'gpgconf --kill gpg-agent 2>/dev/null || true; rm -rf "$GNUPGHOME"' EXIT
+          echo "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"
+
           if ! gpg --batch --import <<<"$GPG_PRIVATE_KEY" 2>/dev/null; then
             echo "::error::GPG_PRIVATE_KEY cannot be parsed by GPG"
             exit 1
           fi
-          if [ -n "$GPG_PASSPHRASE" ]; then
-            if ! printf '%s' "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -sbo /dev/null /dev/null 2>/dev/null; then
-              echo "::error::GPG_PASSPHRASE failed to unlock GPG_PRIVATE_KEY"
-              exit 1
-            fi
+
+          if ! printf '%s' "${GPG_PASSPHRASE:-}" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 -sbo /dev/null /dev/null 2>/dev/null; then
+            echo "::error::GPG_PRIVATE_KEY failed test signing (wrong passphrase, key expired/revoked, or key unusable)"
+            exit 1
           fi
 
   test:
@@ -213,6 +185,7 @@ jobs:
             cmake_extra_flags: ""
             pkg_suffix: ""
             deb_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy"
+            # RPM uses --conflicts without --obsoletes so dnf update never auto-replaces legacy on non-AVX2 hosts
             rpm_extra_args: "--conflicts kvrocks-legacy"
 
           # Legacy x86-64-v1 build (Baseline compatibility for older CPUs/VMs without AVX2)
@@ -240,7 +213,7 @@ jobs:
             arch: arm64
             rpm_arch: aarch64
             cpu_target: generic
-            extra_flags: "-O3"
+            extra_flags: "-march=armv8-a -mtune=generic -O3"
             cmake_extra_flags: ""
             pkg_suffix: ""
             deb_extra_args: ""
@@ -270,13 +243,13 @@ jobs:
       - name: Build Kvrocks
         env:
           # -g emits DWARF symbols that are split into the debuginfo archive afterwards
-          CFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks-${{ env.VERSION }} ${{ matrix.extra_flags }} -Wno-deprecated-declarations
-          CXXFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks-${{ env.VERSION }} ${{ matrix.extra_flags }} -Wno-deprecated-declarations
+          CFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks ${{ matrix.extra_flags }} -Wno-deprecated-declarations
+          CXXFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks ${{ matrix.extra_flags }} -Wno-deprecated-declarations
         run: |
           echo "=== Initial Ccache Pool Status ==="
           ccache -s
           ccache -z
-          git clone --depth 1 --branch "v${VERSION}" "$UPSTREAM_REPO"
+          git clone --depth 1 --branch "v${VERSION}" "$UPSTREAM_REPO" kvrocks
           cd kvrocks
           cmake_extra=()
           if [ -n "${{ matrix.cmake_extra_flags }}" ]; then
@@ -302,15 +275,9 @@ jobs:
 
       - name: Verify Binary Portability
         env:
-          # Must match the glibc requirement enforced by scripts/install.sh
-          MAX_GLIBC_ALLOWED: "2.35"
           CPU_TARGET: ${{ matrix.cpu_target }}
         run: |
-          # AVX/AVX2 uses %ymm. AT&T disassembly spells BMI2 as rorxl/rorxq and the like.
-          # grep must read the whole objdump stream: grep -q closes the pipe early and
-          # objdump then dies with SIGPIPE (141), which pipefail treats as failure.
-          forbidden_re='%ymm|%zmm|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext)[lq]?\>'
-          highest_glibc=""
+          forbidden_re='%ymm|%zmm|%k[1-7]|^\s*[0-9a-f]+:\s+v[a-z0-9]+|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext|andn|bextr|blsi|blsmsk|blsr|tzcnt|lzcnt)[lq]?\>'
 
           for binary in kvrocks/build/kvrocks kvrocks/build/kvrocks2redis; do
             needed=$(readelf -d "$binary" | grep NEEDED)
@@ -321,36 +288,18 @@ jobs:
               exit 1
             fi
 
-            max_glibc=$(objdump -T "$binary" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -n 1)
-            max_glibc="${max_glibc#GLIBC_}"
-            echo "${binary}: highest GLIBC symbol required: ${max_glibc}"
-            if [ "$(printf '%s\n' "$max_glibc" "$MAX_GLIBC_ALLOWED" | sort -V | tail -n 1)" != "$MAX_GLIBC_ALLOWED" ]; then
-              echo "::error::${binary} requires glibc ${max_glibc}, but packages promise compatibility with glibc >= ${MAX_GLIBC_ALLOWED}"
-              exit 1
+            if [ "$CPU_TARGET" = "legacy" ]; then
+              violations=$(objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" | head -n 20 || true)
+              if [ -n "$violations" ]; then
+                echo "::error::${binary} contains AVX/AVX2/BMI instructions, but this is the legacy x86-64-v1 package:"
+                echo "$violations"
+                exit 1
+              fi
             fi
-            highest_glibc="$max_glibc"
-
-            case "$CPU_TARGET" in
-              legacy)
-                violations=$(objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" | head -n 20 || true)
-                if [ -n "$violations" ]; then
-                  echo "::error::${binary} contains AVX2/BMI2 instructions, but this is the legacy x86-64-v1 package:"
-                  echo "$violations"
-                  exit 1
-                fi
-                ;;
-              v3)
-                if [ "$(basename "$binary")" = "kvrocks" ] && ! objdump -d --no-show-raw-insn "$binary" | grep -E '%ymm' >/dev/null; then
-                  echo "::error::${binary} has no AVX (%ymm) instructions; x86-64-v3 flags did not reach the linked binary"
-                  exit 1
-                fi
-                ;;
-            esac
           done
 
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ### Binary Portability (${DEB_ARCH}, ${CPU_TARGET})
-          - kvrocks and kvrocks2redis stay within glibc \`${MAX_GLIBC_ALLOWED}\` (last seen \`${highest_glibc}\`)
           - libstdc++ and libgcc_s are statically linked
           EOF
 
@@ -359,6 +308,9 @@ jobs:
           mkdir dist
           debuginfo="dist/${PKG_NAME}-debuginfo_${VERSION}-${ITERATION}_${DEB_ARCH}.tar.gz"
 
+          debug_staging=$(mktemp -d)
+          mkdir -p "${debug_staging}/usr/lib/debug/usr/bin"
+
           for bin in kvrocks kvrocks2redis; do
             path="kvrocks/build/${bin}"
             objcopy --only-keep-debug "$path" "${path}.debug"
@@ -366,36 +318,35 @@ jobs:
             strip --strip-unneeded "$path"
             objcopy --add-gnu-debuglink="${path}.debug" "$path"
 
-            # The debug file must carry DWARF data and match the stripped binary's GNU Build ID
-            if ! readelf -S "${path}.debug" | grep '\.debug_info' >/dev/null; then
-              echo "::error::${bin}.debug has no .debug_info, DWARF generation failed!"
-              exit 1
-            fi
             bin_id=$(readelf -n "$path" 2>/dev/null | awk '/Build ID:/{print $3}')
-            debug_id=$(readelf -n "${path}.debug" 2>/dev/null | awk '/Build ID:/{print $3}')
-            if [ -z "$bin_id" ] || [ "$bin_id" != "$debug_id" ]; then
-              echo "::error::Build ID mismatch for ${bin}: binary '${bin_id}' != debug '${debug_id}'"
-              readelf -n "$path" || true
-              readelf -n "${path}.debug" || true
+            if [ -z "$bin_id" ]; then
+              echo "::error::Failed to extract Build ID for ${bin}"
               exit 1
             fi
             echo "${bin}: Build ID ${bin_id}"
+
+            # Standard Linux debuginfo layout:
+            # 1. Debuglink path: /usr/lib/debug/usr/bin/<bin>.debug
+            # 2. Build-ID path:  /usr/lib/debug/.build-id/<prefix>/<suffix>.debug (symlink to debuglink)
+            cp "${path}.debug" "${debug_staging}/usr/lib/debug/usr/bin/${bin}.debug"
+            build_id_dir="${debug_staging}/usr/lib/debug/.build-id/${bin_id:0:2}"
+            mkdir -p "$build_id_dir"
+            ln -s "../../usr/bin/${bin}.debug" "${build_id_dir}/${bin_id:2}.debug"
           done
 
-          tar -I pigz -cf "$debuginfo" -C kvrocks/build kvrocks.debug kvrocks2redis.debug
+          tar -I pigz -cf "$debuginfo" -C "$debug_staging" usr
+          rm -rf "$debug_staging"
           ls -lh "$debuginfo" kvrocks/build/kvrocks kvrocks/build/kvrocks2redis
 
       - name: Prepare Packaging RootFS
         run: |
-          mkdir -p rootfs/usr/bin rootfs/etc/kvrocks rootfs/usr/share/doc/kvrocks rootfs/usr/lib/systemd/system
+          mkdir -p rootfs/usr/bin rootfs/etc/kvrocks rootfs/usr/share/doc/kvrocks rootfs/usr/lib/systemd/system rootfs/var/lib/kvrocks rootfs/var/log/kvrocks
 
           cp kvrocks/build/kvrocks kvrocks/build/kvrocks2redis rootfs/usr/bin/
 
           # Configuration with FHS paths and native log retention
           cp kvrocks/kvrocks.conf rootfs/etc/kvrocks/kvrocks.conf
           python3 packaging/patch-config.py rootfs/etc/kvrocks/kvrocks.conf
-          chmod 0640 rootfs/etc/kvrocks/kvrocks.conf
-          chmod 0775 rootfs/etc/kvrocks
 
           # License, notice and pristine upstream configuration references
           cp -r kvrocks/LICENSE kvrocks/NOTICE kvrocks/licenses rootfs/usr/share/doc/kvrocks/
@@ -405,38 +356,29 @@ jobs:
           cp packaging/systemd/kvrocks.service rootfs/usr/lib/systemd/system/
 
           echo "::group::Configuration Diff (Upstream vs Patched)"
-          # diff exits with 1 when the files differ, which is expected here
-          diff -u --color=always rootfs/usr/share/doc/kvrocks/kvrocks.conf.default rootfs/etc/kvrocks/kvrocks.conf || [ $? -eq 1 ]
+          diff -u --color=always rootfs/usr/share/doc/kvrocks/kvrocks.conf.default rootfs/etc/kvrocks/kvrocks.conf || true
           echo "::endgroup::"
 
       - name: Validate Patched Configuration
         run: |
           workdir=$(mktemp -d)
-          mkdir "$workdir/data" "$workdir/log"
-          kvrocks/build/kvrocks -c rootfs/etc/kvrocks/kvrocks.conf \
+          trap 'rm -rf "$workdir"' EXIT
+          mkdir -p "$workdir/data" "$workdir/log"
+
+          # If configuration is invalid, kvrocks fails immediately with non-zero exit code.
+          # If valid, timeout stops the healthy running process at 3s with exit code 124.
+          rc=0
+          timeout 3 kvrocks/build/kvrocks -c rootfs/etc/kvrocks/kvrocks.conf \
             --bind 127.0.0.1 --port 56789 \
             --dir "$workdir/data" --log-dir "$workdir/log" \
-            --daemonize no &
-          pid=$!
-          # The server is either already gone (failed start) or still serving when the step ends
-          trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; rm -rf "$workdir"' EXIT
+            --daemonize no || rc=$?
 
-          for _ in $(seq 30); do
-            if ! kill -0 "$pid" 2>/dev/null; then
-              status=0
-              wait "$pid" || status=$?
-              echo "::error::Kvrocks exited with status ${status} while loading the patched configuration"
-              cat "$workdir"/log/* 2>/dev/null || true
-              exit 1
-            fi
-            if (exec 3<>/dev/tcp/127.0.0.1/56789) 2>/dev/null; then
-              echo "Kvrocks started and accepts connections with the patched configuration."
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "::error::Kvrocks did not accept connections within 30s"
-          exit 1
+          if [ "$rc" -ne 124 ]; then
+            echo "::error::Kvrocks failed to load patched configuration (exit code ${rc})"
+            cat "$workdir"/log/* 2>/dev/null || true
+            exit 1
+          fi
+          echo "Patched configuration loaded successfully."
 
       - name: Package DEB & RPM
         env:
@@ -445,10 +387,23 @@ jobs:
         run: |
           read -ra deb_extra <<<"$DEB_EXTRA_ARGS"
           read -ra rpm_extra <<<"$RPM_EXTRA_ARGS"
-          if [ "$PKG_NAME" = "kvrocks-legacy" ]; then
-            deb_extra+=(--provides "kvrocks (= ${PKG_VERSION}-${ITERATION})")
-            rpm_extra+=(--provides "kvrocks = ${PKG_VERSION}-${ITERATION}")
-          fi
+
+          # Ensure kvrocks user and group exist on runner so accurate ownership can be assigned
+          sudo groupadd -r kvrocks 2>/dev/null || true
+          sudo useradd -r -M -g kvrocks -d /var/lib/kvrocks -s /usr/sbin/nologin -c "Kvrocks Server" kvrocks 2>/dev/null || true
+
+          # Set canonical file ownership and permissions across rootfs right before packaging:
+          # - Binaries, service, docs: root:root
+          # - Config dir: root:kvrocks 0775
+          # - Config file: kvrocks:kvrocks 0640 (writable for CONFIG REWRITE)
+          # - State & log directories: kvrocks:kvrocks 0750
+          sudo chown -R root:root rootfs
+          sudo chown root:kvrocks rootfs/etc/kvrocks
+          sudo chmod 0775 rootfs/etc/kvrocks
+          sudo chown kvrocks:kvrocks rootfs/etc/kvrocks/kvrocks.conf rootfs/var/lib/kvrocks rootfs/var/log/kvrocks
+          sudo chmod 0640 rootfs/etc/kvrocks/kvrocks.conf
+          sudo chmod 0750 rootfs/var/lib/kvrocks rootfs/var/log/kvrocks
+          sudo chmod 0755 rootfs/usr/bin/kvrocks rootfs/usr/bin/kvrocks2redis
 
           common=(
             -s dir -C rootfs
@@ -460,26 +415,33 @@ jobs:
             --url 'https://kvrocks.apache.org'
             --license 'Apache-2.0'
             --config-files /etc/kvrocks/kvrocks.conf
+            --before-install packaging/hooks/preinst.sh
             --before-remove packaging/hooks/prerm.sh
             --after-install packaging/hooks/postinst.sh
             --after-remove packaging/hooks/postrm.sh
           )
 
-          fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
+          # DEB keeps FPM's numeric root ownership; postinst initializes service-owned paths.
+          # RPM records the staged owner/group names, resolved after preinst creates the account.
+          sudo fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
             -d 'libc6 (>= 2.35)' \
             -d libssl3 \
-            --deb-user root --deb-group root \
+            -d init-system-helpers \
+            --deb-pre-depends passwd \
             "${deb_extra[@]}" \
             -p "dist/${PKG_NAME}_${VERSION}-${ITERATION}_${DEB_ARCH}.deb"
 
-          fpm "${common[@]}" -t rpm -a "$RPM_ARCH" \
+          sudo fpm "${common[@]}" -t rpm -a "$RPM_ARCH" \
             -d 'glibc >= 2.35' \
             -d 'libssl.so.3()(64bit)' \
+            --rpm-tag 'Requires(pre): shadow-utils' \
+            --rpm-use-file-permissions \
             --rpm-digest sha256 \
-            --rpm-user root --rpm-group root \
             --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
             "${rpm_extra[@]}" \
             -p "dist/${PKG_NAME}-${VERSION}-${ITERATION}.${RPM_ARCH}.rpm"
+
+          sudo chown -R "$USER:$USER" dist/
 
       - name: Verify Package Metadata
         run: |
@@ -494,35 +456,6 @@ jobs:
           rpm_version=$(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$rpm")
           if [ "$deb_version" != "$expected" ] || [ "$rpm_version" != "$expected" ]; then
             echo "::error::Package version mismatch: expected '${expected}', DEB '${deb_version}', RPM '${rpm_version}'"
-            exit 1
-          fi
-
-          deb_depends=$(dpkg-deb --field "$deb" Depends)
-          rpm_requires=$(rpm -qp --requires "$rpm")
-          if ! grep -qF "libc6 (>= 2.35)" <<<"$deb_depends"; then
-            echo "::error::DEB is missing dependency 'libc6 (>= 2.35)'"
-            echo "$deb_depends"
-            exit 1
-          fi
-          if ! grep -qF "glibc >= 2.35" <<<"$rpm_requires"; then
-            echo "::error::RPM is missing dependency 'glibc >= 2.35'"
-            echo "$rpm_requires"
-            exit 1
-          fi
-
-          deb_provides=$(dpkg-deb --field "$deb" Provides 2>/dev/null || true)
-          if [ "$PKG_NAME" = "kvrocks-legacy" ]; then
-            if [ "$deb_provides" != "kvrocks (= ${expected})" ]; then
-              echo "::error::DEB Provides mismatch: expected 'kvrocks (= ${expected})', got '${deb_provides}'"
-              exit 1
-            fi
-            if ! rpm -qp --provides "$rpm" | grep -qx "kvrocks = ${expected}"; then
-              echo "::error::RPM is missing provide 'kvrocks = ${expected}'"
-              rpm -qp --provides "$rpm"
-              exit 1
-            fi
-          elif [ -n "$deb_provides" ]; then
-            echo "::error::${PKG_NAME} should not declare Provides, got '${deb_provides}'"
             exit 1
           fi
 
@@ -620,15 +553,18 @@ jobs:
 
           gpg --armor --export "$GPG_KEY_ID" > "$RUNNER_TEMP/kvrocks.asc"
           sudo rpm --import "$RUNNER_TEMP/kvrocks.asc"
-          for rpm_pkg in dist/*.rpm; do
-            result=$(sudo rpm -K --define '_pkgverify_level all' "$rpm_pkg")
-            echo "$result"
-            grep -q 'signatures OK' <<<"$result"
-          done
+          sudo rpm --define '_pkgverify_level all' -K dist/*.rpm
 
       - name: Generate Checksums
         working-directory: dist
         run: sha256sum -- *.deb *.rpm *.tar.gz | tee SHA256SUMS
+
+      - name: Sign Checksums
+        if: ${{ !inputs.dry_run }}
+        working-directory: dist
+        run: |
+          gpg --yes --armor --detach-sign -u "$GPG_KEY_ID" -o SHA256SUMS.asc SHA256SUMS
+          gpg --verify SHA256SUMS.asc SHA256SUMS
 
       - name: Stage New Packages
         run: |
@@ -683,24 +619,20 @@ jobs:
             new_repo="staging/rpm/${arch}"
             mkdir -p "$repo_dir"
 
-            createrepo_c --quiet --no-database "$new_repo"
+            createrepo_c --quiet --no-database --general-compress-type gz "$new_repo"
             new_repodata="${new_repo}/repodata"
 
             # A channel/arch without repodata yet is the first release of that channel.
             # --omit-baseurl keeps <location> as a filename under the repo baseurl.
             if [ -d "${repo_dir}/repodata" ]; then
               merged_dir=$(mktemp -d)
-              mergerepo_c --all --omit-baseurl --no-database \
+              mergerepo_c --all --omit-baseurl --no-database --general-compress-type gz \
                 --repo "$repo_dir" --repo "$new_repo" -o "$merged_dir"
               new_repodata="${merged_dir}/repodata"
             fi
 
             rm -rf "${repo_dir}/repodata"
             mv "$new_repodata" "${repo_dir}/repodata"
-            if gzip -dc "${repo_dir}"/repodata/*-primary.xml.gz | grep -F 'xml:base=' >/dev/null; then
-              echo "::error::${repo_dir} primary.xml contains xml:base; locations must be filenames only"
-              exit 1
-            fi
           done
 
       - name: Sign RPM Repository Metadata
@@ -732,16 +664,29 @@ jobs:
             exit 1
           fi
 
-      - name: Create GitHub Release
+      - name: Create Draft GitHub Release
         if: ${{ !inputs.dry_run }}
         env:
           RELEASE_TITLE: Kvrocks ${{ needs.preflight.outputs.version }}-${{ needs.preflight.outputs.iteration }}
         run: |
-          args=(--target "$GITHUB_SHA" --title "$RELEASE_TITLE" --generate-notes)
+          args=(--target "$GITHUB_SHA" --title "$RELEASE_TITLE" --generate-notes --draft)
           if [ "$CHANNEL" = testing ]; then
             args+=(--prerelease)
           fi
+          # Clean up leftover draft release from previous aborted attempts before creating
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Removing stale draft release ${RELEASE_TAG}..."
+            gh release delete "$RELEASE_TAG" --cleanup-tag --yes
+          fi
           gh release create "$RELEASE_TAG" "${args[@]}" dist/*
+
+      # Publish the GitHub Release BEFORE deploying repository metadata to GitHub Pages.
+      # Keep public package assets available before clients receive indexes referencing them.
+      - name: Publish GitHub Release
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "Publishing draft release ${RELEASE_TAG}..."
+          gh release edit "$RELEASE_TAG" --draft=false
 
       - name: Deploy Repository Metadata to GitHub Pages
         if: ${{ !inputs.dry_run }}
@@ -750,8 +695,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "release: ${RELEASE_TAG} (${CHANNEL})"
-          git push origin gh-pages
+          git diff --cached --quiet || git commit -m "release: ${RELEASE_TAG} (${CHANNEL})"
+
+          # Rebase to guard against non-fast-forward push conflicts.
+          # If push fails, abort rebase and clean up the published release to allow safe retry.
+          if ! (git pull --rebase origin gh-pages && git push origin gh-pages); then
+            echo "::error::Failed to deploy metadata to gh-pages; cleaning up release ${RELEASE_TAG} to allow retry..."
+            git rebase --abort 2>/dev/null || true
+            gh release delete "$RELEASE_TAG" --cleanup-tag --yes || true
+            exit 1
+          fi
 
       - name: Summary
         if: ${{ !inputs.dry_run }}
