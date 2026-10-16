@@ -335,6 +335,17 @@
             </button>
           </div>
 
+          <!-- Error Banner when repoOrigin cannot be fetched -->
+          <div x-show="repoOriginError && !repoOriginLoading" x-cloak class="mb-4 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs flex items-center justify-between gap-3">
+            <div class="flex items-center space-x-2">
+              <span>⚠️</span>
+              <span>Unable to resolve repository base URL from <code>kvrocks.repo</code>.</span>
+            </div>
+            <button @click="detectRepoOrigin()" type="button" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 font-semibold transition shrink-0">
+              Retry
+            </button>
+          </div>
+
           <!-- Quick Tab Content -->
           <div x-show="installTab === 'quick'">
             <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
@@ -342,7 +353,11 @@
             </p>
             <div class="relative group">
               <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getQuickInstallCmd()"></code></pre>
-              <button @click="copy(getQuickInstallCmd())" class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1">
+              <button @click="copy(getQuickInstallCmd())" 
+                      :disabled="!repoOrigin"
+                      :class="!repoOrigin ? 'opacity-40 cursor-not-allowed' : 'hover:bg-slate-700'"
+                      class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1"
+                      :title="!repoOrigin ? 'Cannot copy until repository URL is resolved' : 'Copy command'">
                 <span x-text="copied ? '✓ Copied' : 'Copy'"></span>
               </button>
             </div>
@@ -353,17 +368,6 @@
             <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
               Configure repository keys and sources manually for automated configuration management (Ansible, Puppet, Dockerfile).
             </p>
-
-            <!-- Error Banner when repoOrigin cannot be fetched -->
-            <div x-show="repoOriginError && !repoOriginLoading" x-cloak class="mb-4 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs flex items-center justify-between gap-3">
-              <div class="flex items-center space-x-2">
-                <span>⚠️</span>
-                <span>Unable to resolve repository base URL from <code>kvrocks.repo</code>.</span>
-              </div>
-              <button @click="detectRepoOrigin()" type="button" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 font-semibold transition shrink-0">
-                Retry
-              </button>
-            </div>
 
             <div class="relative group">
               <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getManualInstallCmd()"></code></pre>
@@ -773,7 +777,14 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         },
 
         getQuickInstallCmd() {
-          const scriptUrl = 'https://rawvoid.github.io/kvrocks-fpm/install.sh';
+          if (this.repoOriginLoading) {
+            return '# Loading installer command from kvrocks.repo...';
+          }
+          if (!this.repoOrigin || this.repoOriginError) {
+            return '# Error: Failed to resolve repository base URL from kvrocks.repo.\n# Please ensure kvrocks.repo is available or check your network connection.';
+          }
+
+          const scriptUrl = `${this.repoOrigin}/install.sh`;
           if (this.channel === 'testing') {
             return `curl -fsSL ${scriptUrl} | sudo KVROCKS_CHANNEL=testing bash`;
           }
