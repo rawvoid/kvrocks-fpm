@@ -423,11 +423,12 @@ jobs:
 
           # DEB keeps FPM's numeric root ownership; postinst initializes service-owned paths.
           # RPM records the staged owner/group names, resolved after preinst creates the account.
+          # libssl uses an OR dependency: jammy/bookworm ship libssl3,
+          # noble/trixie+ renamed it to libssl3t64 (64-bit time_t transition).
           sudo fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
             -d 'libc6 (>= 2.35)' \
-            -d libssl3 \
+            -d 'libssl3 | libssl3t64' \
             -d init-system-helpers \
-            --deb-pre-depends passwd \
             "${deb_extra[@]}" \
             -p "dist/${PKG_NAME}_${VERSION}-${ITERATION}_${DEB_ARCH}.deb"
 
