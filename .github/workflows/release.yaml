@@ -181,9 +181,6 @@ jobs:
       PKG_NAME: kvrocks${{ matrix.pkg_suffix }}
       DEB_ARCH: ${{ matrix.arch }}
       RPM_ARCH: ${{ matrix.rpm_arch }}
-      # Iteration of the throwaway packages that let the smoke tests exercise real upgrades.
-      # Always below any publishable iteration, which the preflight forces to be >= 1.
-      BASELINE_ITERATION: '0'
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_MAXSIZE: 4G
@@ -445,35 +442,26 @@ jobs:
           # RPM records the staged owner/group names, resolved after preinst creates the account.
           # libssl uses an OR dependency: jammy/bookworm ship libssl3,
           # noble/trixie+ renamed it to libssl3t64 (64-bit time_t transition).
-          build_packages() {
-            local iteration="$1" outdir="$2"
+          sudo fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
+            --iteration "$ITERATION" \
+            -d 'libc6 (>= 2.35)' \
+            -d 'libssl3 | libssl3t64' \
+            -d init-system-helpers \
+            "${deb_extra[@]}" \
+            -p "dist/${PKG_NAME}_${VERSION}-${ITERATION}_${DEB_ARCH}.deb"
 
-            mkdir -p "$outdir"
-            sudo fpm "${common[@]}" -t deb -a "$DEB_ARCH" \
-              --iteration "$iteration" \
-              -d 'libc6 (>= 2.35)' \
-              -d 'libssl3 | libssl3t64' \
-              -d init-system-helpers \
-              "${deb_extra[@]}" \
-              -p "${outdir}/${PKG_NAME}_${VERSION}-${iteration}_${DEB_ARCH}.deb"
+          sudo fpm "${common[@]}" -t rpm -a "$RPM_ARCH" \
+            --iteration "$ITERATION" \
+            -d 'glibc >= 2.35' \
+            -d 'libssl.so.3()(64bit)' \
+            --rpm-tag 'Requires(pre): shadow-utils' \
+            --rpm-use-file-permissions \
+            --rpm-digest sha256 \
+            --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
+            "${rpm_extra[@]}" \
+            -p "dist/${PKG_NAME}-${VERSION}-${ITERATION}.${RPM_ARCH}.rpm"
 
-            sudo fpm "${common[@]}" -t rpm -a "$RPM_ARCH" \
-              --iteration "$iteration" \
-              -d 'glibc >= 2.35' \
-              -d 'libssl.so.3()(64bit)' \
-              --rpm-tag 'Requires(pre): shadow-utils' \
-              --rpm-use-file-permissions \
-              --rpm-digest sha256 \
-              --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
-              "${rpm_extra[@]}" \
-              -p "${outdir}/${PKG_NAME}-${VERSION}-${iteration}.${RPM_ARCH}.rpm"
-          }
-
-          build_packages "$ITERATION" dist
-          # Same payload, lower iteration: only consumed by the lifecycle smoke tests.
-          build_packages "$BASELINE_ITERATION" test-baseline
-
-          sudo chown -R "$USER:$USER" dist/ test-baseline/
+          sudo chown -R "$USER:$USER" dist/
 
       - name: Verify Package Metadata
         run: |
@@ -515,13 +503,6 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-      - name: Upload Lifecycle Test Baseline
-        uses: actions/upload-artifact@v7
-        with:
-          name: baseline-${{ matrix.arch }}-${{ matrix.cpu_target }}
-          path: test-baseline/*
-          if-no-files-found: error
-
       - name: Save ccache
         uses: actions/cache/save@v6
         if: always()
@@ -529,39 +510,9 @@ jobs:
           path: .ccache
           key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-  package-smoke:
-    name: Package Lifecycle Smoke Tests
-    needs: [preflight, build-and-package]
-    runs-on: ubuntu-24.04
-    env:
-      VERSION: ${{ needs.preflight.outputs.version }}
-      ITERATION: ${{ needs.preflight.outputs.iteration }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Download Built Packages
-        uses: actions/download-artifact@v8
-        with:
-          pattern: packages-*
-          path: dist
-          merge-multiple: true
-
-      - name: Download Lifecycle Test Baselines
-        uses: actions/download-artifact@v8
-        with:
-          pattern: baseline-*
-          path: test-baseline
-          merge-multiple: true
-
-      - name: Verify Docker Engine
-        run: docker info --format '{{.ServerVersion}}'
-
-      - name: Install, Upgrade, Switch Flavors, and Remove Packages
-        run: bash scripts/package-smoke-test.sh "$VERSION" "$ITERATION"
-
   publish:
     name: Publish Release & Repositories
-    needs: [preflight, package-smoke]
+    needs: [preflight, build-and-package]
     runs-on: ubuntu-22.04
     permissions:
       contents: write

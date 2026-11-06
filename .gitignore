@@ -3,7 +3,6 @@ release/
 rpm-release/
 rootfs/
 dist/
-test-baseline/
 kvrocks/
 *.deb
 *.rpm
