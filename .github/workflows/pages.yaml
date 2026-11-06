@@ -1,5 +1,7 @@
 name: Pages
 
+# Shares its group with the release publish job, which pushes to the same gh-pages branch. `queue: max`
+# keeps a queued run from being dropped when a newer one enters the group.
 concurrency:
   group: pages-repository-deployment
   cancel-in-progress: false

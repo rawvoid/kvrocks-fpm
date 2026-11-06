@@ -526,7 +526,8 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    # Serialize all gh-pages writers (this job and pages.yaml)
+    # Serialize all gh-pages writers (this job and pages.yaml). `queue: max` keeps a pending publish from
+    # being dropped when a pages run enters the group while this job waits.
     concurrency:
       group: pages-repository-deployment
       cancel-in-progress: false
