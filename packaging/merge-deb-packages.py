@@ -2,11 +2,14 @@
 """
 Merge Debian APT `Packages` indexes produced by dpkg-scanpackages.
 
-Stanzas are keyed by (Package, Architecture, Version). If the target Packages file does not exist,
-it is created; if it exists, historical stanzas and their order are preserved and new versions are
-appended. An existing key with an identical SHA256 is skipped idempotently; a different SHA256 is
-rejected so a published package version can never be silently altered. The file is replaced atomically
-with 0644 permissions: readers never observe a partially written index.
+Stanzas are keyed by (Package, Architecture, Version). An empty line ends a stanza; a line holding
+only whitespace is a continuation line, exactly as apt's own parser reads it. If the target Packages
+file does not exist, it is created; if it exists, historical stanzas and their order are preserved
+and new versions are appended. An existing key with an identical SHA256 is skipped idempotently; a
+different SHA256 is rejected so a published package version can never be silently altered. Rejection
+is final for that version: recover by bumping the package iteration, or by editing the published
+index by hand. The file is replaced atomically with 0644 permissions: readers never observe a
+partially written index.
 """
 
 import argparse
@@ -22,8 +25,8 @@ REQUIRED_FIELDS = (*KEY_FIELDS, "sha256")
 
 
 def parse_stanzas(content: str) -> List[str]:
-    """Split a Packages index into its RFC 822 stanzas (separated by blank lines)."""
-    return [stanza.strip() for stanza in re.split(r"\n\s*\n", content) if stanza.strip()]
+    """Split a Packages index into its RFC 822 stanzas (separated by empty lines)."""
+    return [stanza.strip() for stanza in re.split(r"\n\r?\n", content) if stanza.strip()]
 
 
 def parse_stanza_fields(stanza: str) -> Dict[str, str]:
@@ -33,8 +36,13 @@ def parse_stanza_fields(stanza: str) -> Dict[str, str]:
         if line.startswith((" ", "\t")):
             continue
         name, separator, value = line.partition(":")
-        if separator:
-            fields.setdefault(name.strip().lower(), value.strip())
+        if not separator:
+            continue
+        name = name.strip().lower()
+        if name in fields:
+            # Two stanzas were run together: the later one would be silently dropped.
+            raise ValueError(f"Field '{name}' is repeated within one stanza:\n{stanza}")
+        fields[name] = value.strip()
     return fields
 
 
@@ -71,6 +79,7 @@ def merge_packages(
             raise ValueError(f"Existing Packages file '{target}' contains no package stanzas")
     else:
         merged = {}
+    existing = len(merged)
 
     new = load_index(Path(new_file))
     if not new:
@@ -104,7 +113,7 @@ def merge_packages(
 
     print(
         f"Merged {added} new stanza(s) ({skipped} identical skipped) "
-        f"into {len(merged) - added} existing ones: {target}"
+        f"into {existing} existing ones: {target}"
     )
 
 
