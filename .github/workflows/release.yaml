@@ -6,6 +6,7 @@ permissions:
 concurrency:
   group: release-pipeline
   cancel-in-progress: false
+  queue: max
 
 env:
   # fpm is pinned for reproducible packages (setup-fpm actions provision the unrelated Fortran Package Manager)
