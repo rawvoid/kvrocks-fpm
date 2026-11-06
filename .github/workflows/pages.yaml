@@ -40,15 +40,8 @@ jobs:
 
       - name: Sync Assets to gh-pages
         run: |
-          # 1. Synchronize automated installer script
-          if [ -f main-repo/scripts/install.sh ]; then
-            cp -p main-repo/scripts/install.sh gh-pages-branch/install.sh
-          fi
-
-          # 2. Synchronize landing page
-          if [ -f main-repo/web/index.html ]; then
-            cp -p main-repo/web/index.html gh-pages-branch/index.html
-          fi
+          cp -p main-repo/scripts/install.sh gh-pages-branch/install.sh
+          cp -p main-repo/web/index.html gh-pages-branch/index.html
 
           cd gh-pages-branch
 
