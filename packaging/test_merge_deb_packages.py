@@ -21,6 +21,11 @@ read_stanza = merge_deb_packages.read_stanza
 merge_packages = merge_deb_packages.merge_packages
 parse_stanzas = merge_deb_packages.parse_stanzas
 
+try:  # Optional: proves the merged index against the reference deb822 parser.
+    from debian.deb822 import Packages as ReferencePackages
+except ImportError:
+    ReferencePackages = None
+
 HASH_A = "a" * 64
 HASH_B = "b" * 64
 
@@ -123,6 +128,28 @@ Description: Legacy package
         self.assertIn(f"Description: {description}\n", merged)
         self.assertEqual([read_stanza(s)[0][0] for s in parse_stanzas(merged)], ["kvrocks", "kvrocks-legacy"])
 
+    def test_whitespace_only_line_is_a_continuation_not_a_stanza_break(self):
+        # apt reads a whitespace-only line as part of Description, so it must not split the stanza.
+        description = "First line\n \n Last line"
+        target_file = self.write("Packages", stanza("kvrocks", "2.15.0-1", Description=description))
+        new_file = self.write("Packages.new", stanza("kvrocks-legacy", "2.16.0-1"))
+
+        merge_packages(new_file, target_file)
+
+        merged = self.read("Packages")
+        self.assertIn(f"Description: {description}\n", merged)
+        self.assertEqual(len(parse_stanzas(merged)), 2)
+
+    def test_repeated_field_in_one_stanza_raises_error(self):
+        # A whitespace-only line used as a separator runs two stanzas together; the second set of
+        # fields must fail loudly instead of being silently dropped from the published index.
+        new_file = self.write(
+            "Packages.new", stanza("kvrocks", "2.15.0-1") + " \n" + stanza("kvrocks-legacy", "2.16.0-1")
+        )
+
+        with self.assertRaisesRegex(ValueError, "is repeated"):
+            merge_packages(new_file, self.path("Packages"))
+
     def test_merged_index_is_world_readable_regardless_of_umask(self):
         new_file = self.write("Packages.new", stanza("kvrocks", "2.15.0-1"))
         target_file = self.path("Packages")
@@ -134,6 +161,34 @@ Description: Legacy package
             os.umask(previous_umask)
 
         self.assertEqual(stat.S_IMODE(os.stat(target_file).st_mode), 0o644)
+
+    def test_successful_merge_leaves_no_temp_file(self):
+        new_file = self.write("Packages.new", stanza("kvrocks", "2.15.0-1"))
+
+        merge_packages(new_file, self.path("Packages"))
+
+        self.assertEqual(sorted(os.listdir(self.temp_dir.name)), ["Packages", "Packages.new"])
+
+    @unittest.skipUnless(ReferencePackages, "python-debian is not installed")
+    def test_merged_index_parses_with_the_reference_deb822_parser(self):
+        description = "First line\n .\n Last line"
+        target_file = self.write("Packages", stanza("kvrocks", "2.15.0-1", Description=description))
+        new_file = self.write("Packages.new", stanza("kvrocks-legacy", "2.16.0-1", arch="arm64"))
+
+        merge_packages(new_file, target_file)
+
+        with open(target_file, encoding="utf-8") as handle:
+            parsed = [
+                (p["Package"], p["Architecture"], p["Version"], p["SHA256"])
+                for p in ReferencePackages.iter_paragraphs(handle, use_apt_pkg=False)
+            ]
+        self.assertEqual(
+            parsed,
+            [
+                ("kvrocks", "amd64", "2.15.0-1", HASH_A),
+                ("kvrocks-legacy", "arm64", "2.16.0-1", HASH_A),
+            ],
+        )
 
     def test_failed_replace_keeps_published_index_and_cleans_temp_file(self):
         published = stanza("kvrocks", "2.15.0-1", SHA256=HASH_A)
