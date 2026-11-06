@@ -19,6 +19,12 @@ jobs:
         with:
           python-version: '3.10'
 
+      # python-debian re-parses the merged Packages index with the reference deb822 parser, so the
+      # conformance assertion runs instead of being skipped.
+      - name: Install Python Test Dependencies
+        run: |
+          pip install python-debian
+
       - name: Run Python Unit Tests
         run: |
           python3 -m unittest discover -s packaging -p "test_*.py" -v
