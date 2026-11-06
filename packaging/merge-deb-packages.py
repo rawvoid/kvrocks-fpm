@@ -5,10 +5,12 @@ Merge Debian APT `Packages` indexes produced by dpkg-scanpackages.
 Stanzas are keyed by (Package, Architecture, Version). If the target Packages file does not exist,
 it is created; if it exists, historical stanzas and their order are preserved and new versions are
 appended. An existing key with an identical SHA256 is skipped idempotently; a different SHA256 is
-rejected so a published package version can never be silently altered.
+rejected so a published package version can never be silently altered. The file is replaced atomically
+with 0644 permissions: readers never observe a partially written index.
 """
 
 import argparse
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
@@ -36,27 +38,24 @@ def parse_stanza_fields(stanza: str) -> Dict[str, str]:
     return fields
 
 
-def extract_stanza_key(stanza: str) -> Key:
-    """Return the (Package, Architecture, Version) key of a stanza."""
+def read_stanza(stanza: str) -> Tuple[Key, str]:
+    """Return the merge key and lower-cased SHA256 of one stanza."""
     fields = parse_stanza_fields(stanza)
     missing = [name for name in REQUIRED_FIELDS if not fields.get(name)]
     if missing:
         raise ValueError(f"Stanza is missing required field(s) {', '.join(missing)}:\n{stanza}")
-    return fields["package"], fields["architecture"], fields["version"]
+
+    return (fields["package"], fields["architecture"], fields["version"]), fields["sha256"].lower()
 
 
 def load_index(path: Path) -> Dict[Key, Tuple[str, str]]:
     """Load a Packages file into an insertion-ordered {key: (stanza, sha256)} mapping."""
     stanzas: Dict[Key, Tuple[str, str]] = {}
     for stanza in parse_stanzas(path.read_text(encoding="utf-8")):
-        fields = parse_stanza_fields(stanza)
-        missing = [name for name in REQUIRED_FIELDS if not fields.get(name)]
-        if missing:
-            raise ValueError(f"Stanza is missing required field(s) {', '.join(missing)}:\n{stanza}")
-        key = (fields["package"], fields["architecture"], fields["version"])
+        key, sha256 = read_stanza(stanza)
         if key in stanzas:
             raise ValueError(f"Duplicate stanza {key} in {path}")
-        stanzas[key] = (stanza, fields["sha256"].lower())
+        stanzas[key] = stanza, sha256
     return stanzas
 
 
@@ -92,7 +91,16 @@ def merge_packages(
 
     content = "\n\n".join(stanza for stanza, _ in merged.values()) + "\n"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+
+    # A cancelled or crashed run must never leave a truncated index in the live gh-pages tree.
+    temp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(content, encoding="utf-8")
+        temp.chmod(0o644)
+        temp.replace(target)
+    except Exception:
+        temp.unlink(missing_ok=True)
+        raise
 
     print(
         f"Merged {added} new stanza(s) ({skipped} identical skipped) "

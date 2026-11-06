@@ -5,9 +5,11 @@ Unit tests for merge-deb-packages.py.
 
 import importlib.util
 import os
+import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 script_path = os.path.join(os.path.dirname(__file__), "merge-deb-packages.py")
 spec = importlib.util.spec_from_file_location("merge_deb_packages", script_path)
@@ -15,7 +17,7 @@ merge_deb_packages = importlib.util.module_from_spec(spec)
 sys.modules["merge_deb_packages"] = merge_deb_packages
 spec.loader.exec_module(merge_deb_packages)
 
-extract_stanza_key = merge_deb_packages.extract_stanza_key
+read_stanza = merge_deb_packages.read_stanza
 merge_packages = merge_deb_packages.merge_packages
 parse_stanzas = merge_deb_packages.parse_stanzas
 
@@ -49,11 +51,12 @@ class TestMergeDebPackages(unittest.TestCase):
         with open(self.path(name), "r", encoding="utf-8") as f:
             return f.read()
 
-    def test_extract_stanza_key_is_case_insensitive_and_ignores_multiline_continuations(self):
-        key = extract_stanza_key(
+    def test_read_stanza_key_is_case_insensitive_and_ignores_multiline_continuations(self):
+        key, sha256 = read_stanza(
             f"package: kvrocks\nDescription: text\n Version: not-a-field\nversion: 1.0-1\narchitecture: arm64\nsha256: {HASH_A}"
         )
         self.assertEqual(key, ("kvrocks", "arm64", "1.0-1"))
+        self.assertEqual(sha256, HASH_A)
 
     def test_parse_stanzas(self):
         content = f"""Package: kvrocks
@@ -71,8 +74,8 @@ Description: Legacy package
 """
         stanzas = parse_stanzas(content)
         self.assertEqual(len(stanzas), 2)
-        self.assertEqual(extract_stanza_key(stanzas[0]), ("kvrocks", "amd64", "2.15.0-1"))
-        self.assertEqual(extract_stanza_key(stanzas[1]), ("kvrocks-legacy", "amd64", "2.15.0-1"))
+        self.assertEqual(read_stanza(stanzas[0])[0], ("kvrocks", "amd64", "2.15.0-1"))
+        self.assertEqual(read_stanza(stanzas[1])[0], ("kvrocks-legacy", "amd64", "2.15.0-1"))
 
     def test_merge_creates_target_file_on_first_release(self):
         new_file = self.write("Packages.new", stanza("kvrocks", "2.15.0-1"))
@@ -108,6 +111,41 @@ Description: Legacy package
         with self.assertRaises(ValueError):
             merge_packages(new_file, target_file)
         self.assertEqual(self.read("Packages"), stanza("kvrocks", "2.15.0-1", SHA256=HASH_A))
+
+    def test_merge_preserves_multiline_fields(self):
+        description = "First line\n Second line\n .\n Last line"
+        target_file = self.write("Packages", stanza("kvrocks", "2.15.0-1", Description=description))
+        new_file = self.write("Packages.new", stanza("kvrocks-legacy", "2.16.0-1"))
+
+        merge_packages(new_file, target_file)
+
+        merged = self.read("Packages")
+        self.assertIn(f"Description: {description}\n", merged)
+        self.assertEqual([read_stanza(s)[0][0] for s in parse_stanzas(merged)], ["kvrocks", "kvrocks-legacy"])
+
+    def test_merged_index_is_world_readable_regardless_of_umask(self):
+        new_file = self.write("Packages.new", stanza("kvrocks", "2.15.0-1"))
+        target_file = self.path("Packages")
+
+        previous_umask = os.umask(0o077)
+        try:
+            merge_packages(new_file, target_file)
+        finally:
+            os.umask(previous_umask)
+
+        self.assertEqual(stat.S_IMODE(os.stat(target_file).st_mode), 0o644)
+
+    def test_failed_replace_keeps_published_index_and_cleans_temp_file(self):
+        published = stanza("kvrocks", "2.15.0-1", SHA256=HASH_A)
+        target_file = self.write("Packages", published)
+        new_file = self.write("Packages.new", stanza("kvrocks", "2.16.0-1", SHA256=HASH_B))
+
+        with patch.object(merge_deb_packages.Path, "replace", side_effect=OSError("replace failed")):
+            with self.assertRaises(OSError):
+                merge_packages(new_file, target_file)
+
+        self.assertEqual(self.read("Packages"), published)
+        self.assertEqual(sorted(os.listdir(self.temp_dir.name)), ["Packages", "Packages.new"])
 
     def test_duplicate_stanza_within_one_file_raises_error(self):
         new_file = self.write("Packages.new", stanza("kvrocks", "2.15.0-1") + "\n" + stanza("kvrocks", "2.15.0-1"))
