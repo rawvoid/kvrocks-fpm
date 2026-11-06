@@ -482,9 +482,12 @@ jobs:
 
           # Contract checks the maintainer scripts rely on: the conffile that upgrade must
           # preserve, and the helper package the Debian hooks call.
-          dpkg-deb --info "$deb" conffiles | grep -Fxq /etc/kvrocks/kvrocks.conf
-          rpm -qp --configfiles "$rpm" | grep -Fxq /etc/kvrocks/kvrocks.conf
-          dpkg-deb --field "$deb" Depends | grep -Fq init-system-helpers
+          dpkg-deb --info "$deb" conffiles | grep -Fxq /etc/kvrocks/kvrocks.conf \
+            || { echo "::error::${PKG_NAME} DEB: conffile /etc/kvrocks/kvrocks.conf missing"; exit 1; }
+          rpm -qp --configfiles "$rpm" | grep -Fxq /etc/kvrocks/kvrocks.conf \
+            || { echo "::error::${PKG_NAME} RPM: /etc/kvrocks/kvrocks.conf not marked %config"; exit 1; }
+          dpkg-deb --field "$deb" Depends | grep -Fq init-system-helpers \
+            || { echo "::error::${PKG_NAME} DEB: missing Depends init-system-helpers"; exit 1; }
 
           # x86-64 ships two mutually exclusive flavors that share every path, so each must
           # conflict with the other; arm64 ships a single flavor and declares no conflicts.
@@ -493,8 +496,10 @@ jobs:
               kvrocks-legacy) other_flavor=kvrocks ;;
               *)              other_flavor=kvrocks-legacy ;;
             esac
-            dpkg-deb --field "$deb" Conflicts | grep -Fq "$other_flavor"
-            rpm -qp --conflicts "$rpm" | grep -Fxq "$other_flavor"
+            dpkg-deb --field "$deb" Conflicts | grep -Fxq "$other_flavor" \
+              || { echo "::error::${PKG_NAME} DEB: missing Conflicts ${other_flavor}"; exit 1; }
+            rpm -qp --conflicts "$rpm" | grep -Fxq "$other_flavor" \
+              || { echo "::error::${PKG_NAME} RPM: missing Conflicts ${other_flavor}"; exit 1; }
           fi
 
       - name: Upload Build Artifacts
