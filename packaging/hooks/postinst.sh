@@ -1,17 +1,9 @@
 #!/bin/sh
 set -e
 
-# RPM only ($1 is numeric): %post of the replacing flavor runs before %preun of the
-# obsolete one, so leave a marker telling that %preun not to stop or disable the service.
-# %posttrans removes it again.
-case "$1" in
-    ''|*[!0-9]*) ;;
-    *)
-        touch /run/kvrocks.dont-disable 2>/dev/null || true
-        ;;
-esac
-
-# Initialize service ownership for DEB (RPM uses staged package metadata)
+# DEB ($1 is non-numeric): initialize service-owned paths (RPM uses staged package metadata).
+# RPM ($1 is numeric): %post of the replacing flavor runs before %preun of the obsolete one,
+# so leave a marker telling that %preun not to stop or disable the service; %posttrans removes it.
 case "$1" in
     ''|*[!0-9]*)
         mkdir -p /var/lib/kvrocks /var/log/kvrocks /etc/kvrocks
@@ -28,6 +20,9 @@ case "$1" in
             chown kvrocks:kvrocks "$conf"
             chmod 640 "$conf"
         fi
+        ;;
+    *)
+        touch /run/kvrocks.dont-disable 2>/dev/null || true
         ;;
 esac
 
