@@ -3,6 +3,7 @@ name: Pages
 concurrency:
   group: pages-repository-deployment
   cancel-in-progress: false
+  queue: max
 
 on:
   push:

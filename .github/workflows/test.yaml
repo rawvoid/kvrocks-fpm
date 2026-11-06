@@ -49,8 +49,8 @@ jobs:
 
       - name: Run Shellcheck
         run: |
-          shellcheck scripts/install.sh packaging/hooks/*.sh
+          shellcheck scripts/*.sh packaging/hooks/*.sh
 
       - name: Validate Shell Script Syntax
         run: |
-          bash -n scripts/install.sh packaging/hooks/*.sh
+          bash -n scripts/*.sh packaging/hooks/*.sh

@@ -53,7 +53,7 @@ curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
 curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo KVROCKS_CHANNEL=testing bash
 ```
 
-Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; failures are reported but do not by themselves abort the package transaction.
+Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; a failed service operation never aborts the package transaction.
 
 Do not assume flavor switches preserve service state: APT may remove the old flavor in a separate removal step, stopping and disabling it. After switching, check `systemctl status kvrocks` and `systemctl is-enabled kvrocks`; restore only the states you previously wanted:
 
@@ -177,11 +177,13 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
   gh workflow run release.yaml -f version=2.15.0 -f iteration=1 -f dry_run=true
   ```
 
-Publishing writes the indexes locally, creates a GitHub Release, and deploys metadata to `gh-pages`. If deploying metadata fails, the workflow automatically aborts the rebase and deletes the unreferenced Release and Git tag, ensuring no split-brain state (where a release exists on GitHub but is missing from repository indexes) and allowing safe re-runs of the same version.
+Publishing creates a draft GitHub Release, makes it public, and then deploys metadata to `gh-pages`. Metadata is pushed once; a failure stops the workflow without retrying, deleting, or re-creating the public Release.
 
-Repository requirements: the `gh-pages` branch must exist (it can be empty of packages), repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
+Repository requirements: the `gh-pages` branch must exist (it is checked even for dry runs and can be empty of packages), repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
 
-**Pre-release versions**: `2.15.0-rc1` packages are built with internal package version `2.15.0~rc1` (the `~` ensures APT/DNF recognize that `2.15.0~rc1 < 2.15.0`, so upgrading to the GA release is seamless when both versions are visible to the package manager). The suffix is a single identifier such as `rc1` or `rc.1`; a hyphen is rejected because RPM `Version` cannot contain `-`. External artifacts and release tags retain the standard naming (e.g. `kvrocks_2.15.0-rc1-1_amd64.deb`, tag `v2.15.0-rc1-1`).
+Before publishing, the workflow installs, upgrades, switches between flavors, and removes the generated packages in Ubuntu 22.04, Debian 13, and Fedora containers. Service management is not exercised: `systemctl` and `deb-systemd-invoke` are replaced by logging stubs, so these tests cover the maintainer scripts' decisions rather than a live systemd lifecycle. The test baseline uses the same payload and maintainer hooks at package iteration `0` and is never uploaded to a release or repository.
+
+**Pre-release versions**: `2.15.0-rc1` packages are built with internal package version `2.15.0~rc1` (the `~` ensures APT/DNF recognize that `2.15.0~rc1 < 2.15.0`, so upgrading to the GA release is seamless when both versions are visible to the package manager). The installer always configures the stable APT channel and adds testing when selected, so testing users can see later GA releases. The suffix is a single identifier such as `rc1` or `rc.1`; a hyphen is rejected because RPM `Version` cannot contain `-`. External artifacts and release tags retain the standard naming (e.g. `kvrocks_2.15.0-rc1-1_amd64.deb`, tag `v2.15.0-rc1-1`).
 
 ---
 

@@ -80,6 +80,23 @@ fetch_text() {
     fi
 }
 
+write_apt_sources() {
+    local repo_list="$1"
+    local keyring_file="$2"
+    local repo_url="$3"
+    local arch="$4"
+    local channel="$5"
+
+    {
+        echo "# Apache Kvrocks Repository (${channel})"
+        echo "deb [arch=${arch} signed-by=${keyring_file}] ${repo_url} stable main"
+        if [ "$channel" = "testing" ]; then
+            echo "deb [arch=${arch} signed-by=${keyring_file}] ${repo_url} testing main"
+        fi
+    } > "$repo_list"
+    chmod 0644 "$repo_list"
+}
+
 resolve_repo_url() {
     # 1. Allow explicit environment variable override
     if [ -n "${KVROCKS_REPO_URL:-}" ]; then
@@ -272,12 +289,8 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
         info "Fetching repository GPG signing key..."
         fetch_file "${REPO_URL}/kvrocks.gpg" "$KEYRING_FILE" 0644
 
-        # Write repository source entry
-        cat > "$REPO_LIST" << EOF
-# Apache Kvrocks Repository (${CHANNEL})
-deb [arch=${ARCH} signed-by=${KEYRING_FILE}] ${REPO_URL} ${CHANNEL} main
-EOF
-        chmod 0644 "$REPO_LIST"
+        # Always keep stable visible so testing users can upgrade to GA releases.
+        write_apt_sources "$REPO_LIST" "$KEYRING_FILE" "$REPO_URL" "$ARCH" "$CHANNEL"
 
         # 5. Update APT cache and install package
         info "Updating package lists..."
