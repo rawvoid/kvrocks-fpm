@@ -292,7 +292,12 @@ jobs:
         env:
           CPU_TARGET: ${{ matrix.cpu_target }}
         run: |
-          forbidden_re='%ymm|%zmm|%k[1-7]|^\s*[0-9a-f]+:\s+v[a-z0-9]+|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext|andn|bextr|blsi|blsmsk|blsr|tzcnt|lzcnt)[lq]?\>'
+          # AVX/AVX2/AVX-512 use %ymm/%zmm/mask registers and VEX-encoded mnemonics.
+          # tzcnt is deliberately absent: it is the F3-prefixed encoding of bsf ("rep bsf"),
+          # which a pre-BMI CPU executes as plain bsf with the same result for a nonzero input,
+          # and compilers emit that encoding for __builtin_ctz on a baseline x86-64 target.
+          # lzcnt stays listed: rep bsr does not mean bsr, so it is a real BMI1 dependency.
+          forbidden_re='%ymm|%zmm|%k[1-7]|^\s*[0-9a-f]+:\s+v[a-z0-9]+|\<(rorx|shlx|sarx|shrx|bzhi|mulx|pdep|pext|andn|bextr|blsi|blsmsk|blsr|lzcnt)[lq]?\>'
 
           for binary in kvrocks/build/kvrocks kvrocks/build/kvrocks2redis; do
             needed=$(readelf -d "$binary" | grep NEEDED)
@@ -304,7 +309,7 @@ jobs:
             fi
 
             if [ "$CPU_TARGET" = "legacy" ]; then
-              violations=$(objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" | head -n 20 || true)
+              violations=$(objdump -d --no-show-raw-insn "$binary" | grep -E "$forbidden_re" || true)
               if [ -n "$violations" ]; then
                 echo "::error::${binary} contains AVX/AVX2/BMI instructions, but this is the legacy x86-64-v1 package:"
                 echo "$violations"
