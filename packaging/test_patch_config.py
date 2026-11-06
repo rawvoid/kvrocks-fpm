@@ -17,7 +17,6 @@ sys.modules["patch_config"] = patch_config_module
 spec.loader.exec_module(patch_config_module)
 
 patch_config = patch_config_module.patch_config
-patch_directive = patch_config_module.patch_directive
 
 
 class TestPatchConfig(unittest.TestCase):
@@ -83,11 +82,6 @@ class TestPatchConfig(unittest.TestCase):
         patch_config(self.conf_path, patches)
         second_result = self._read_conf()
         self.assertEqual(first_result, second_result)
-
-    def test_patch_directive_wrapper(self):
-        self._write_conf("daemonize yes\n")
-        patch_directive(self.conf_path, "daemonize", "no")
-        self.assertIn("daemonize no\n", self._read_conf())
 
     def test_production_patches(self):
         initial = (

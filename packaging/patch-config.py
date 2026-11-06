@@ -55,11 +55,6 @@ def patch_config(file_path: str, directives: Dict[str, str]) -> None:
     os.replace(temp_name, file_path)
 
 
-def patch_directive(file_path: str, key: str, value: str) -> None:
-    """Backwards-compatible wrapper to patch a single directive."""
-    patch_config(file_path, {key: value})
-
-
 def main() -> None:
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <path-to-kvrocks.conf>", file=sys.stderr)
