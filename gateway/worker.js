@@ -14,8 +14,9 @@
 
 // Filename conventions: deb `<name>_<version>-<revision>_<arch>.deb`, rpm `<name>-<version>-<release>.<arch>.rpm`.
 // Capture group 1 is `${VERSION}-${ITERATION}`, i.e. the release tag without the leading "v".
-const DEB_PKG_RE = /^[^_]+_([0-9]+\.[0-9]+\.[0-9]+[^_]*)_[^_]+\.deb$/;
-const RPM_PKG_RE = /-([0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+~-]*-[0-9A-Za-z.+~]+)\.(?:x86_64|aarch64)\.rpm$/;
+const VERSION_REV = "([0-9]+\\.[0-9]+\\.[0-9]+[0-9A-Za-z.+~-]*-[0-9A-Za-z.+~]+)";
+const DEB_PKG_RE = new RegExp(`^[a-z0-9.+-]+_${VERSION_REV}_(?:amd64|arm64)\\.deb$`);
+const RPM_PKG_RE = new RegExp(`^[a-z0-9.+-]+-${VERSION_REV}\\.(?:x86_64|aarch64)\\.rpm$`);
 
 // Indexes that change on every release and reference each other (Release -> Packages, repomd.xml -> repodata).
 const REPO_INDEX_RE = /\/(?:InRelease|Release|Release\.gpg|Packages(?:\.\w+)?|repomd\.xml(?:\.asc)?)$/;
@@ -40,14 +41,6 @@ const PACKAGE_RESPONSE_HEADERS = [
 ];
 
 /**
- * Percent-encodes a filename or version for use as one URL path segment, keeping `+` literal.
- * `encodeURIComponent` also escapes `/`, `?` and `#`, so the value cannot alter the URL structure.
- */
-function encodePathSegment(value) {
-  return encodeURIComponent(value).replaceAll("%2B", "+");
-}
-
-/**
  * Resolves the GitHub Release asset URL for a package request path.
  *
  * @param {string} pathname Request path, e.g. /pool/main/kvrocks_2.17.0-1_amd64.deb
@@ -67,7 +60,7 @@ export function resolveReleaseDownloadUrl(pathname, repo) {
   const match = filename.match(DEB_PKG_RE) ?? filename.match(RPM_PKG_RE);
   if (!match) return null;
 
-  return `https://github.com/${repo}/releases/download/v${encodePathSegment(match[1])}/${encodePathSegment(filename)}`;
+  return `https://github.com/${repo}/releases/download/v${match[1]}/${filename}`;
 }
 
 function textResponse(body, status, headers = {}) {

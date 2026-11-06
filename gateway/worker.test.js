@@ -155,19 +155,10 @@ test("resolveReleaseDownloadUrl - Decodes percent-encoded filenames (%2b, %7e)",
   );
 });
 
-test("resolveReleaseDownloadUrl - Cannot alter the URL structure via encoded ?, # or /", () => {
-  assert.equal(
-    resolve("/pool/main/kvrocks_2.17.0%23inject-1_amd64.deb"),
-    `https://github.com/${TEST_REPO}/releases/download/v2.17.0%23inject-1/kvrocks_2.17.0%23inject-1_amd64.deb`
-  );
-  assert.equal(
-    resolve("/pool/main/kvrocks_2.17.0%3fquery-1_amd64.deb"),
-    `https://github.com/${TEST_REPO}/releases/download/v2.17.0%3Fquery-1/kvrocks_2.17.0%3Fquery-1_amd64.deb`
-  );
-  assert.equal(
-    resolve("/pool/main/kvrocks_2.17.0-1%2f..%2f..%2fother_amd64.deb"),
-    `https://github.com/${TEST_REPO}/releases/download/v2.17.0-1%2F..%2F..%2Fother/kvrocks_2.17.0-1%2F..%2F..%2Fother_amd64.deb`
-  );
+test("resolveReleaseDownloadUrl - Rejects filenames with ?, # or /", () => {
+  assert.equal(resolve("/pool/main/kvrocks_2.17.0%23inject-1_amd64.deb"), null);
+  assert.equal(resolve("/pool/main/kvrocks_2.17.0%3fquery-1_amd64.deb"), null);
+  assert.equal(resolve("/pool/main/kvrocks_2.17.0-1%2f..%2f..%2fother_amd64.deb"), null);
 });
 
 test("resolveReleaseDownloadUrl - Malformed percent-encoding returns null", () => {
