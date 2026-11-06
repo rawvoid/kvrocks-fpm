@@ -803,7 +803,10 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
           const pkg = 'kvrocks' + this.getPkgSuffix();
 
           if (this.os === 'debian') {
-            return `# 1. Install prerequisites & import GPG key\nsudo install -m 0755 -d /etc/apt/keyrings\ncurl -fsSL ${origin}/kvrocks.gpg | sudo tee /etc/apt/keyrings/kvrocks.gpg > /dev/null\n\n# 2. Add repository source\necho "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/kvrocks.gpg] ${origin} ${this.channel} main" | sudo tee /etc/apt/sources.list.d/kvrocks.list\n\n# 3. Update index & install package\nsudo apt-get update\nsudo apt-get install -y ${pkg}`;
+            const testingSource = this.channel === 'testing'
+              ? `\necho "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/kvrocks.gpg] ${origin} testing main" | sudo tee -a /etc/apt/sources.list.d/kvrocks.list`
+              : '';
+            return `# 1. Install prerequisites & import GPG key\nsudo install -m 0755 -d /etc/apt/keyrings\ncurl -fsSL ${origin}/kvrocks.gpg | sudo tee /etc/apt/keyrings/kvrocks.gpg > /dev/null\n\n# 2. Add repository source\necho "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/kvrocks.gpg] ${origin} stable main" | sudo tee /etc/apt/sources.list.d/kvrocks.list${testingSource}\n\n# 3. Update index & install package\nsudo apt-get update\nsudo apt-get install -y ${pkg}`;
           }
 
           const extraRepo = this.channel === 'testing' ? '--enablerepo=kvrocks-testing ' : '';
