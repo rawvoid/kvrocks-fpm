@@ -303,13 +303,9 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
         apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "${TARGET_PACKAGE}"
 
     elif [ "$OS_FAMILY" = "rhel" ]; then
-        # 4. Configure RPM (YUM / DNF) Repository
-        if command -v dnf >/dev/null 2>&1; then
-            PKG_MGR="dnf"
-        elif command -v yum >/dev/null 2>&1; then
-            PKG_MGR="yum"
-        else
-            error "Neither dnf nor yum was found on this RPM-based system."
+        # 4. Configure RPM (DNF) Repository
+        if ! command -v dnf >/dev/null 2>&1; then
+            error "dnf was not found on this RPM-based system."
         fi
 
         REPO_FILE="/etc/yum.repos.d/kvrocks.repo"
@@ -345,28 +341,15 @@ gpgkey=file://${KEY_FILE}
 EOF
         chmod 0644 "$REPO_FILE"
 
-        # 5. Install package via DNF / YUM
+        # 5. Install package via DNF
         RPM_EXTRA_OPTS=()
         if [ "$CHANNEL" = "testing" ]; then
             info "Enabling kvrocks-testing repository channel..."
             RPM_EXTRA_OPTS+=(--enablerepo=kvrocks-testing)
         fi
 
-        info "Installing ${TARGET_PACKAGE} via ${PKG_MGR} (${CHANNEL})..."
-        if [ "$PKG_MGR" = "dnf" ]; then
-            "$PKG_MGR" install -y --refresh --allowerasing "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
-        else
-            "$PKG_MGR" makecache || true
-            if [ "$TARGET_PACKAGE" = "kvrocks" ] && rpm -q kvrocks-legacy >/dev/null 2>&1; then
-                info "Swapping kvrocks-legacy with kvrocks via yum..."
-                "$PKG_MGR" swap -y kvrocks-legacy kvrocks "${RPM_EXTRA_OPTS[@]}" || "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
-            elif [ "$TARGET_PACKAGE" = "kvrocks-legacy" ] && rpm -q kvrocks >/dev/null 2>&1; then
-                info "Swapping kvrocks with kvrocks-legacy via yum..."
-                "$PKG_MGR" swap -y kvrocks kvrocks-legacy "${RPM_EXTRA_OPTS[@]}" || "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
-            else
-                "$PKG_MGR" install -y "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
-            fi
-        fi
+        info "Installing ${TARGET_PACKAGE} via dnf (${CHANNEL})..."
+        dnf install -y --refresh --allowerasing "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
     fi
 
     # 6. Installation verification and summary
