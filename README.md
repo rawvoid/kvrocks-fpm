@@ -55,7 +55,7 @@ curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo KVROCKS_CHANN
 
 Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; a failed service operation never aborts the package transaction.
 
-Do not assume flavor switches preserve service state: APT may remove the old flavor in a separate removal step, stopping and disabling it. After switching, check `systemctl status kvrocks` and `systemctl is-enabled kvrocks`; restore only the states you previously wanted:
+Do not assume flavor switches preserve service state: APT removes the old flavor in a separate removal step, stopping and disabling it. After switching, check `systemctl status kvrocks` and `systemctl is-enabled kvrocks`; restore only the states you previously wanted:
 
 ```bash
 sudo systemctl start kvrocks   # Only if previously running

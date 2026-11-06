@@ -126,14 +126,14 @@ run_deb_tests() {
         exit 1
     fi
     grep -Fxq '# lifecycle-smoke-preserved' /etc/kvrocks/kvrocks.conf
-    assert_no_stop_or_disable
+    # APT removes the replaced flavor in its own step (no "remove in-favour"), so the old prerm
+    # stops and disables the service: a Debian flavor switch does not preserve service state.
     assert_service_restart
 
     : > "$actions"
     apt_install "$main_actual"
     test "$(dpkg-query -W -f='${db:Status-Status}' kvrocks)" = installed
     grep -Fxq '# lifecycle-smoke-preserved' /etc/kvrocks/kvrocks.conf
-    assert_no_stop_or_disable
     assert_service_restart
 
     : > "$actions"
