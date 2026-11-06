@@ -1,115 +1,62 @@
 #!/usr/bin/env python3
 """
-Merge Debian APT `Packages` indexes produced by the release workflow's dpkg-scanpackages.
+Merge Debian APT `Packages` indexes produced by dpkg-scanpackages.
 
-Stanzas are keyed by the original (Package, Architecture, Version) strings; version validation
-belongs to the release workflow. This script is not a general Debian metadata validator.
-
-If the target Packages file does not exist, it is created (first release); if it exists, historical
-order and normalized stanza content are preserved, and new versions are appended.
-For an existing key, a matching SHA256 is an idempotent retry that keeps the historical stanza;
-a different SHA256 is rejected (duplicate/altered version prohibited).
-Identity fields and SHA256 must be nonempty and single-line. Basic parsing checks reject duplicate
-fields, missing colons and orphaned continuation lines. Empty inputs are rejected. Line endings
-and stanza separators are normalized, then output is atomically replaced with 0644 permissions.
-The release workflow serializes writers; this script does not provide concurrent-update locking.
+Stanzas are keyed by (Package, Architecture, Version). If the target Packages file does not exist,
+it is created; if it exists, historical stanzas and their order are preserved and new versions are
+appended. An existing key with an identical SHA256 is skipped idempotently; a different SHA256 is
+rejected so a published package version can never be silently altered.
 """
 
 import argparse
-import os
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
-# Package, Architecture, Version (original strings)
 Key = Tuple[str, str, str]
 
 KEY_FIELDS = ("package", "architecture", "version")
-SINGLE_LINE_FIELDS = {"package", "architecture", "version", "sha256"}
-
-
-def normalize_content(content: str) -> str:
-    """Normalize line endings to standard Unix LF (\\n)."""
-    return content.replace("\r\n", "\n").replace("\r", "\n")
+REQUIRED_FIELDS = (*KEY_FIELDS, "sha256")
 
 
 def parse_stanzas(content: str) -> List[str]:
-    """Split on blank lines, normalizing line endings without stripping field indentation."""
-    stanzas: List[str] = []
-    lines: List[str] = []
-    for line in normalize_content(content).split("\n"):
-        if line.strip(" \t"):
-            lines.append(line)
-        elif lines:
-            stanzas.append("\n".join(lines))
-            lines = []
-    if lines:
-        stanzas.append("\n".join(lines))
-    return stanzas
+    """Split a Packages index into its RFC 822 stanzas (separated by blank lines)."""
+    return [stanza.strip() for stanza in re.split(r"\n\s*\n", content) if stanza.strip()]
 
 
 def parse_stanza_fields(stanza: str) -> Dict[str, str]:
-    """Read first-line field values with basic syntax checks; retain continuations in the stanza."""
+    """Extract first-line field values from a stanza, ignoring multiline continuations."""
     fields: Dict[str, str] = {}
-    current_field: Optional[str] = None
-
-    for line in stanza.rstrip("\n").split("\n"):
+    for line in stanza.splitlines():
         if line.startswith((" ", "\t")):
-            if current_field is None:
-                raise ValueError(f"Orphaned continuation line at beginning of stanza: {line}")
-            if current_field in SINGLE_LINE_FIELDS:
-                raise ValueError(
-                    f"Single-line field '{current_field}' must not contain continuation line: {line}"
-                )
             continue
-
         name, separator, value = line.partition(":")
-        if not separator:
-            raise ValueError(f"Invalid stanza line without colon: {line}")
-
-        if name != name.rstrip():
-            raise ValueError(
-                f"Field name '{name}' must not have whitespace before colon: {line}"
-            )
-        if not name:
-            raise ValueError(f"Empty field name in stanza: {line}")
-
-        lower_name = name.lower()
-        if lower_name in fields:
-            raise ValueError(f"Duplicate field '{name}' in stanza")
-
-        current_field = lower_name
-        fields[current_field] = value.strip()
-
+        if separator:
+            fields.setdefault(name.strip().lower(), value.strip())
     return fields
 
 
-def validate_stanza(fields: Dict[str, str], raw_stanza: str) -> Key:
-    """Require the identity fields and checksum needed for merging, and return the raw key."""
-    missing = [name for name in KEY_FIELDS + ("sha256",) if not fields.get(name)]
+def extract_stanza_key(stanza: str) -> Key:
+    """Return the (Package, Architecture, Version) key of a stanza."""
+    fields = parse_stanza_fields(stanza)
+    missing = [name for name in REQUIRED_FIELDS if not fields.get(name)]
     if missing:
-        raise ValueError(f"Stanza is missing required field(s) {', '.join(missing)}:\n{raw_stanza}")
-
+        raise ValueError(f"Stanza is missing required field(s) {', '.join(missing)}:\n{stanza}")
     return fields["package"], fields["architecture"], fields["version"]
 
 
-def extract_stanza_key(stanza: str) -> Key:
-    """Return the raw (Package, Architecture, Version) key after checking merge prerequisites."""
-    fields = parse_stanza_fields(stanza)
-    return validate_stanza(fields, stanza)
-
-
 def load_index(path: Path) -> Dict[Key, Tuple[str, str]]:
-    """Load raw keys into an insertion-ordered mapping of (stanza, SHA256)."""
+    """Load a Packages file into an insertion-ordered {key: (stanza, sha256)} mapping."""
     stanzas: Dict[Key, Tuple[str, str]] = {}
-
-    content = path.read_text(encoding="utf-8")
-    for stanza in parse_stanzas(content):
+    for stanza in parse_stanzas(path.read_text(encoding="utf-8")):
         fields = parse_stanza_fields(stanza)
-        key = validate_stanza(fields, stanza)
+        missing = [name for name in REQUIRED_FIELDS if not fields.get(name)]
+        if missing:
+            raise ValueError(f"Stanza is missing required field(s) {', '.join(missing)}:\n{stanza}")
+        key = (fields["package"], fields["architecture"], fields["version"])
         if key in stanzas:
             raise ValueError(f"Duplicate stanza {key} in {path}")
-        stanzas[key] = stanza, fields["sha256"].lower()
-
+        stanzas[key] = (stanza, fields["sha256"].lower())
     return stanzas
 
 
@@ -117,54 +64,39 @@ def merge_packages(
     new_file: Union[str, Path],
     target_file: Union[str, Path],
 ) -> None:
-    """
-    Append stanzas of `new_file` to `target_file`.
-    If `target_file` exists, historical stanzas are preserved and new versions are appended.
-    If `target_file` does not exist, it is initialized from `new_file`.
-    """
+    """Append stanzas of `new_file` to `target_file`, preserving historical entries."""
     target = Path(target_file)
     if target.exists():
-        merged_stanzas = load_index(target)
-        if not merged_stanzas:
+        merged = load_index(target)
+        if not merged:
             raise ValueError(f"Existing Packages file '{target}' contains no package stanzas")
     else:
-        merged_stanzas = {}
+        merged = {}
 
-    new_stanzas = load_index(Path(new_file))
-    if not new_stanzas:
+    new = load_index(Path(new_file))
+    if not new:
         raise ValueError(f"{new_file} contains no package stanzas")
 
-    added_count = 0
-    skipped_count = 0
-
-    for key, (stanza, sha256) in new_stanzas.items():
-        if key in merged_stanzas:
-            if merged_stanzas[key][1] == sha256:
-                skipped_count += 1
+    added = 0
+    skipped = 0
+    for key, (stanza, sha256) in new.items():
+        if key in merged:
+            if merged[key][1] == sha256:
+                skipped += 1
                 continue
             raise ValueError(
                 f"Refusing to overwrite already indexed package version: {key} (SHA256 differs)"
             )
+        merged[key] = (stanza, sha256)
+        added += 1
 
-        merged_stanzas[key] = stanza, sha256
-        added_count += 1
-
-    content = "\n\n".join(stanza for stanza, _ in merged_stanzas.values()) + "\n"
-
+    content = "\n\n".join(stanza for stanza, _ in merged.values()) + "\n"
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
-    try:
-        temp.write_text(content, encoding="utf-8")
-        temp.chmod(0o644)
-        temp.replace(target)
-    except Exception:
-        temp.unlink(missing_ok=True)
-        raise
+    target.write_text(content, encoding="utf-8")
 
     print(
-        f"Merged {added_count} new stanza(s) "
-        f"({skipped_count} identical skipped) "
-        f"into {len(merged_stanzas) - added_count} existing ones: {target}"
+        f"Merged {added} new stanza(s) ({skipped} identical skipped) "
+        f"into {len(merged) - added} existing ones: {target}"
     )
 
 
