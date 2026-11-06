@@ -3,6 +3,10 @@ name: Release Packages
 permissions:
   contents: read
 
+# Releases must never overlap: one run at a time, every queued run kept and executed one after another.
+# `cancel-in-progress: false` only protects the run already executing — by default GitHub keeps a single
+# pending run and silently cancels the ones behind it, which loses releases. A queued run for an
+# already-published version fails fast in preflight, so keeping the whole queue is cheap.
 concurrency:
   group: release-pipeline
   cancel-in-progress: false
