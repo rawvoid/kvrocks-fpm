@@ -3,11 +3,18 @@
 # Apache Kvrocks Automated Installer for Linux Systems (Debian/Ubuntu/RHEL/CentOS/Rocky/Alma/Fedora)
 # Detects CPU capabilities (AVX2/BMI2) and installs the optimal package variant.
 #
-# Usage:
-#   curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
+# Usage (the landing page prints this command for the right host):
+#   curl -fsSL https://<gateway-origin>/install.sh | sudo bash
+#
+# The script installs from the origin it was downloaded from. When it is copied away from the gateway,
+# set KVROCKS_REPO_URL to the repository origin before running it.
 #
 
 set -euo pipefail
+
+# Replaced by the gateway with the origin this script was served from, so no repository host is baked
+# into the installer: a custom domain, a *.workers.dev host and a fork all resolve to themselves.
+REPO_ORIGIN="__REPO_ORIGIN__"
 
 # Visual formatting (disabled if not in a terminal or NO_COLOR is set)
 if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ] && [ -z "${NO_COLOR:-}" ]; then
@@ -69,17 +76,6 @@ fetch_file() {
     trap - EXIT
 }
 
-fetch_text() {
-    local url="$1"
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$url" 2>/dev/null || true
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "$url" 2>/dev/null || true
-    else
-        error "Neither curl nor wget is available. Please install curl or wget."
-    fi
-}
-
 write_apt_sources() {
     local repo_list="$1"
     local keyring_file="$2"
@@ -104,20 +100,14 @@ resolve_repo_url() {
         return 0
     fi
 
-    # 2. Dynamically resolve from authoritative kvrocks.repo
-    local repo_cfg_url="https://rawvoid.github.io/kvrocks-fpm/kvrocks.repo"
-    local content
-    content="$(fetch_text "$repo_cfg_url")"
-
-    local resolved_url
-    resolved_url="$(echo "$content" | grep -m1 '^baseurl=' | sed -E 's|^baseurl=(https?://[^/]+).*|\1|' || true)"
-
-    # 3. Explicit error if resolution failed (strictly no hardcoded fallback)
-    if [ -z "$resolved_url" ]; then
-        error "Failed to resolve repository URL from ${repo_cfg_url}. Please check your network connection or specify KVROCKS_REPO_URL."
-    fi
-
-    echo "${resolved_url%/}"
+    # 2. Otherwise use the origin this script was served from, filled in by the gateway. A bare
+    #    placeholder means the file was copied off the gateway, so there is nothing to resolve against.
+    case "${REPO_ORIGIN}" in
+        http://* | https://*) echo "${REPO_ORIGIN%/}" ;;
+        *)
+            error "This installer was not downloaded from the repository gateway. Download it from the gateway, or set KVROCKS_REPO_URL to the repository origin."
+            ;;
+    esac
 }
 
 is_debian_derivative() {
