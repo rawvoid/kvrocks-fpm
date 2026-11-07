@@ -519,8 +519,8 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    # Serialize all gh-pages writers (this job and pages.yaml). `queue: max` keeps a pending publish from
-    # being dropped when a pages run enters the group while this job waits.
+    # Serialize gh-pages writes. `queue: max` keeps a pending publish from being dropped when a second
+    # release enters the group while this one runs.
     concurrency:
       group: pages-repository-deployment
       cancel-in-progress: false
@@ -715,15 +715,31 @@ jobs:
           sed "s|@GATEWAY_URL@|${GATEWAY_URL%/}|g" packaging/kvrocks.repo.in > pages/kvrocks.repo
           touch pages/.nojekyll
 
-      # The repository only hosts metadata; binaries live on GitHub Releases and are served by the gateway.
-      - name: Audit Zero-Binary Invariant
+      # The branch holds repository metadata only: binaries live on GitHub Releases (streamed by the
+      # gateway) and the landing page & installer are static assets of the gateway Worker, deployed by
+      # .github/workflows/gateway.yaml. Drop any copy left behind by the old pages sync, then hold the
+      # branch to the whitelist so the split cannot silently erode.
+      - name: Drop Assets Now Served by the Worker
+        run: rm -f pages/index.html pages/install.sh
+
+      - name: Audit Metadata-Only Invariant
         run: |
+          allowed='^\./(\.nojekyll|kvrocks\.(gpg|asc|repo)|dists/|rpm/)'
+          stray=$(cd pages && find . -path ./.git -prune -o -type f -print | grep -Ev "$allowed" || true)
           leaked=$(find pages -name .git -prune -o -type f \( -name '*.deb' -o -name '*.rpm' \) -print)
+
+          status=0
+          if [ -n "$stray" ]; then
+            echo "::error title=Metadata-Only Invariant Violated::Files that are not repository metadata found in gh-pages:"
+            echo "$stray"
+            status=1
+          fi
           if [ -n "$leaked" ]; then
             echo "::error title=Binary Leak Detected::Package binaries found in the metadata repository:"
             echo "$leaked"
-            exit 1
+            status=1
           fi
+          exit "$status"
 
       - name: Prepare Repository Metadata Commit
         if: ${{ !inputs.dry_run }}
