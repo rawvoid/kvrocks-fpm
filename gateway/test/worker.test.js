@@ -536,47 +536,9 @@ test("worker.fetch - Conditional headers never turn errors into 304", async () =
 
 // --- Installer --------------------------------------------------------------
 
-const INSTALLER_SOURCE = "#!/usr/bin/env bash\nREPO_ORIGIN=__REPO_ORIGIN__\n";
-
-function assetsEnv(response = () => new Response(INSTALLER_SOURCE)) {
-  return { ...TEST_ENV, ASSETS: { fetch: async () => response() } };
-}
-
-const failUpstream = () => {
-  throw new Error("the installer must never reach the metadata origin");
-};
-
-test("worker.fetch - /install.sh is served by the Worker with the origin it was downloaded from", async () => {
-  const { res, fetchCalls } = await call("/install.sh?x=1", { env: assetsEnv(), upstream: failUpstream });
-
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
-  assert.equal(res.headers.get("cache-control"), "public, max-age=300");
-  assert.equal(await res.text(), `#!/usr/bin/env bash\nREPO_ORIGIN=https://kvrocks-repo.example.com\n`);
-  assert.equal(fetchCalls.length, 0);
-});
-
-test("worker.fetch - /install.sh HEAD returns the headers without a body", async () => {
-  const { res } = await call("/install.sh", { method: "HEAD", env: assetsEnv() });
-
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
-  assert.equal(await res.text(), "");
-});
-
-test("worker.fetch - /install.sh passes an asset miss through instead of proxying it", async () => {
-  const { res, fetchCalls } = await call("/install.sh", {
-    env: assetsEnv(() => new Response("Not Found", { status: 404 })),
-    upstream: failUpstream,
-  });
-
-  assert.equal(res.status, 404);
-  assert.equal(fetchCalls.length, 0);
-});
-
-test("worker.fetch - /install.sh without the ASSETS binding fails fast", async () => {
-  const { res, fetchCalls } = await call("/install.sh", { env: TEST_ENV, upstream: failUpstream });
-
-  assert.equal(res.status, 500);
-  assert.equal(fetchCalls.length, 0);
+test("worker.fetch - /install.sh is a static asset, never the Worker's business", async () => {
+  // The asset layer answers this path before the Worker runs; if a request ever reached here the
+  // installer would be proxied to the metadata origin instead of the deployed copy.
+  const { fetchCalls } = await call("/install.sh");
+  assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}/install.sh`);
 });

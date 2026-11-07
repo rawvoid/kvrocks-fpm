@@ -4,8 +4,10 @@
   "description": "Cloudflare Worker edge gateway for Apache Kvrocks APT & RPM package repository",
   "type": "module",
   "scripts": {
+    "build": "node scripts/render.mjs",
     "test": "node --test test/worker.test.js",
-    "deploy": "npx wrangler deploy"
+    "dev": "node scripts/render.mjs && npx wrangler dev",
+    "deploy": "node scripts/render.mjs && npx wrangler deploy"
   },
   "keywords": [
     "kvrocks",
@@ -14,6 +16,5 @@
     "cloudflare-worker",
     "reverse-proxy"
   ],
-  "author": "rawvoid",
   "license": "Apache-2.0"
 }

@@ -6,14 +6,15 @@
 # Usage (the landing page prints this command for the right host):
 #   curl -fsSL https://<gateway-origin>/install.sh | sudo bash
 #
-# The script installs from the origin it was downloaded from. When it is copied away from the gateway,
-# set KVROCKS_REPO_URL to the repository origin before running it.
+# The script installs from the repository origin baked in below at build time. When it is copied away
+# from that origin, set KVROCKS_REPO_URL to the repository origin before running it.
 #
 
 set -euo pipefail
 
-# Replaced by the gateway with the origin this script was served from, so no repository host is baked
-# into the installer: a custom domain, a *.workers.dev host and a fork all resolve to themselves.
+# Filled in by `scripts/render.mjs` from the KVROCKS_GATEWAY_URL repository variable, so the installer
+# carries no host of its own and a fork needs no edit: the origin always matches the repository the
+# packages come from.
 REPO_ORIGIN="__REPO_ORIGIN__"
 
 # Visual formatting (disabled if not in a terminal or NO_COLOR is set)
@@ -100,12 +101,12 @@ resolve_repo_url() {
         return 0
     fi
 
-    # 2. Otherwise use the origin this script was served from, filled in by the gateway. A bare
-    #    placeholder means the file was copied off the gateway, so there is nothing to resolve against.
+    # 2. Otherwise use the origin baked in at build time. A bare placeholder means this build was made
+    #    without KVROCKS_GATEWAY_URL, so there is nothing to resolve against.
     case "${REPO_ORIGIN}" in
         http://* | https://*) echo "${REPO_ORIGIN%/}" ;;
         *)
-            error "This installer was not downloaded from the repository gateway. Download it from the gateway, or set KVROCKS_REPO_URL to the repository origin."
+            error "This installer was not built with a repository origin. Download it from the repository gateway, or set KVROCKS_REPO_URL to the repository origin."
             ;;
     esac
 }

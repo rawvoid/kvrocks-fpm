@@ -18,3 +18,4 @@ SHA256SUMS
 # Cloudflare & Node.js
 .wrangler/
 node_modules/
+.dev.vars

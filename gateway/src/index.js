@@ -5,12 +5,9 @@
  *   from the filename (tag = `v${VERSION}-${ITERATION}`, see release.yaml), so no GitHub API call is
  *   needed. Full 200 responses are cached via caches.default keyed by the canonical GitHub URL, because
  *   GitHub answers with a short-lived signed redirect that `cf.cacheEverything` must not pin.
- * - The landing page and the installer are Static Assets of this Worker: with `run_worker_first` unset
- *   for them, an asset hit is answered by the edge without running any of this code. `/install.sh` is
- *   the one exception (targeted by `run_worker_first` in wrangler.toml): it is routed here so the bare
- *   `__REPO_ORIGIN__` placeholder can be replaced with the origin the client downloaded from. That
- *   keeps the installer correct on a custom domain, a `*.workers.dev` host or a fork, with no build
- *   step and no config.
+ * - The landing page and the installer are plain Static Assets of this Worker, rendered at build time
+ *   by `scripts/render.mjs`: an asset hit is answered by the edge without running any of this code, so
+ *   nothing here knows about either file.
  * - Everything else (APT/DNF metadata, keys, repository config) is proxied from GitHub Pages with
  *   `cf.cacheEverything`. APT/DNF indexes get a short TTL to keep the window in which an edge holds a
  *   mix of old and new files small; content-addressed DNF repodata is immutable.
@@ -36,12 +33,6 @@ const HASHED_REPODATA_TTL = 30 * 24 * 3600;
 const SIGNING_KEY_TTL = 24 * 3600;
 const DEFAULT_TTL = 600;
 const NEGATIVE_TTL = 30;
-
-const INSTALLER_PATH = "/install.sh";
-// Replaced by the origin `/install.sh` was downloaded from; a bare placeholder means the script was
-// copied off the gateway, and the installer tells the user to pass KVROCKS_REPO_URL instead.
-const INSTALLER_PLACEHOLDER = "__REPO_ORIGIN__";
-const INSTALLER_TTL = 300;
 
 const PACKAGE_RESPONSE_HEADERS = [
   "content-type",
@@ -220,28 +211,6 @@ async function handleMetadata(request, metadataOrigin, pathname) {
   return new Response(isHead ? null : upstream.body, { status: upstream.status, headers });
 }
 
-async function handleInstaller(request, env) {
-  if (!env.ASSETS) {
-    return textResponse("Gateway Misconfiguration: the ASSETS binding is required for /install.sh.", 500);
-  }
-
-  const asset = await env.ASSETS.fetch(new URL(INSTALLER_PATH, request.url));
-  if (!asset.ok) return textResponse("Installer Not Found", asset.status);
-
-  // The asset is the single source of truth for the script; only the origin placeholder is dynamic.
-  const script = (await asset.text()).replaceAll(INSTALLER_PLACEHOLDER, new URL(request.url).origin);
-  const isHead = request.method === "HEAD";
-
-  return new Response(isHead ? null : script, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": `public, max-age=${INSTALLER_TTL}`,
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
-}
-
 export default {
   async fetch(request, env, ctx) {
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -258,8 +227,6 @@ export default {
     }
 
     const { pathname } = new URL(request.url);
-    if (pathname === INSTALLER_PATH) return handleInstaller(request, env);
-
     return isPackagePath(pathname)
       ? handlePackage(request, ctx, githubRepo, pathname)
       : handleMetadata(request, metadataOrigin, pathname);
