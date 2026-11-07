@@ -399,6 +399,10 @@ jobs:
         env:
           DEB_EXTRA_ARGS: ${{ matrix.deb_extra_args }}
           RPM_EXTRA_ARGS: ${{ matrix.rpm_extra_args }}
+          # Package metadata names the account running the pipeline, so a fork attributes its own builds
+          # to itself. Both are overridable with repository variables.
+          PACKAGE_VENDOR: ${{ vars.KVROCKS_PACKAGE_VENDOR || github.repository_owner }}
+          PACKAGE_MAINTAINER: ${{ vars.KVROCKS_PACKAGE_MAINTAINER || format('{0} <{0}@users.noreply.github.com>', github.repository_owner) }}
         run: |
           read -ra deb_extra <<<"$DEB_EXTRA_ARGS"
           read -ra rpm_extra <<<"$RPM_EXTRA_ARGS"
@@ -531,10 +535,6 @@ jobs:
       CHANNEL: ${{ needs.preflight.outputs.channel }}
       GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
-      # Package metadata names the account running the pipeline, so a fork attributes its own builds to
-      # itself. Both are overridable with repository variables when the defaults are not what you want.
-      PACKAGE_VENDOR: ${{ vars.KVROCKS_PACKAGE_VENDOR || github.repository_owner }}
-      PACKAGE_MAINTAINER: ${{ vars.KVROCKS_PACKAGE_MAINTAINER || format('{0} <{0}@users.noreply.github.com>', github.repository_owner) }}
     steps:
       - uses: actions/checkout@v7
 

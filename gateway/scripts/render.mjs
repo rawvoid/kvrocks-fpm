@@ -15,7 +15,7 @@
 import { execFileSync } from "node:child_process";
 import { cpSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const GITHUB_REPO_PLACEHOLDER = "__GITHUB_REPO__";
 const REPO_ORIGIN_PLACEHOLDER = "__REPO_ORIGIN__";
@@ -83,40 +83,55 @@ function walk(dir, prefix = "") {
   });
 }
 
-const slug = resolveSlug();
-const origin = resolveOrigin();
+/**
+ * Renders `public/` into `dist/` and returns the values it resolved.
+ *
+ * @returns {{ slug: string, origin: string|null }}
+ */
+export function render() {
+  const slug = resolveSlug();
+  const origin = resolveOrigin();
 
-rmSync(distDir, { recursive: true, force: true });
-cpSync(publicDir, distDir, { recursive: true });
+  rmSync(distDir, { recursive: true, force: true });
+  cpSync(publicDir, distDir, { recursive: true });
 
-/** Replaces `placeholder` in every rendered file that contains it, returning the paths written. */
-function substitute(placeholder, value) {
-  const written = [];
-  for (const rel of walk(distDir)) {
-    const path = join(distDir, rel);
-    const source = readFileSync(path, "utf8");
-    if (!source.includes(placeholder)) continue;
+  /** Replaces `placeholder` in every rendered file that contains it, returning the paths written. */
+  function substitute(placeholder, value) {
+    const written = [];
+    for (const rel of walk(distDir)) {
+      const path = join(distDir, rel);
+      const source = readFileSync(path, "utf8");
+      if (!source.includes(placeholder)) continue;
 
-    writeFileSync(path, source.replaceAll(placeholder, value));
-    written.push(rel);
+      writeFileSync(path, source.replaceAll(placeholder, value));
+      written.push(rel);
+    }
+    return written;
   }
-  return written;
+
+  const renderedPage = substitute(GITHUB_REPO_PLACEHOLDER, slug);
+  const renderedInstaller = origin ? substitute(REPO_ORIGIN_PLACEHOLDER, origin) : [];
+
+  // `wrangler dev` reads local-only variables from `.dev.vars`; `wrangler deploy` does not, which is why
+  // `scripts/deploy.mjs` passes the same value with `--var`.
+  writeFileSync(join(gatewayDir, ".dev.vars"), `GITHUB_REPO=${slug}\n`);
+
+  console.log(`render: repository ${slug}`);
+  console.log(`render: origin ${origin ?? "(KVROCKS_GATEWAY_URL unset)"}`);
+  for (const rel of renderedPage) console.log(`render: ${rel} <- ${GITHUB_REPO_PLACEHOLDER}`);
+  for (const rel of renderedInstaller) console.log(`render: ${rel} <- ${REPO_ORIGIN_PLACEHOLDER}`);
+
+  if (!origin) {
+    console.warn(
+      "render: KVROCKS_GATEWAY_URL is not set, so install.sh keeps the bare placeholder and will ask for " +
+        "KVROCKS_REPO_URL instead of installing."
+    );
+  }
+
+  return { slug, origin };
 }
 
-const renderedPage = substitute(GITHUB_REPO_PLACEHOLDER, slug);
-const renderedInstaller = origin ? substitute(REPO_ORIGIN_PLACEHOLDER, origin) : [];
-
-// `wrangler dev` reads local-only variables from `.dev.vars`; CI passes the same value with `--var`.
-writeFileSync(join(gatewayDir, ".dev.vars"), `GITHUB_REPO=${slug}\n`);
-
-console.log(`render: repository ${slug}`);
-console.log(`render: origin ${origin ?? "(KVROCKS_GATEWAY_URL unset)"}`);
-for (const rel of renderedPage) console.log(`render: ${rel} <- ${GITHUB_REPO_PLACEHOLDER}`);
-for (const rel of renderedInstaller) console.log(`render: ${rel} <- ${REPO_ORIGIN_PLACEHOLDER}`);
-
-if (!origin) {
-  console.warn(
-    "render: KVROCKS_GATEWAY_URL is not set, so install.sh keeps the bare placeholder and will ask for " +
-      "KVROCKS_REPO_URL instead of installing."
-  );
+// The script also works standalone (`node scripts/render.mjs`), which is what `npm run build` does.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  render();
 }

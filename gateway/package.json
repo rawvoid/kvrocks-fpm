@@ -7,7 +7,7 @@
     "build": "node scripts/render.mjs",
     "test": "node --test test/worker.test.js",
     "dev": "node scripts/render.mjs && npx wrangler dev",
-    "deploy": "node scripts/render.mjs && npx wrangler deploy"
+    "deploy": "node scripts/deploy.mjs"
   },
   "keywords": [
     "kvrocks",

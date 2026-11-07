@@ -16,6 +16,7 @@ gateway/
 ├── src/index.js         # the Worker
 ├── test/                # node:test unit tests
 ├── scripts/render.mjs   # public/ -> dist/, resolving both placeholders
+├── scripts/deploy.mjs   # render + wrangler deploy, passing the slug as --var
 ├── public/              # asset *sources*, committed
 │   ├── index.html       # landing page, carries __GITHUB_REPO__
 │   └── install.sh       # installer, carries __REPO_ORIGIN__
@@ -67,10 +68,10 @@ without invoking the Worker**, everything else reaches `src/index.js`.
 ### From GitHub Actions
 
 Pushing to `main` with changes under `gateway/**` renders the assets and deploys:
-`.github/workflows/gateway.yaml` runs the shared quality gate, `npm run build` (with
-`KVROCKS_GATEWAY_URL` from repository variables), then
-`wrangler deploy --var GITHUB_REPO:${{ github.repository }}`. The Worker script and every rendered file
-ship as one version, so routing, page and installer can never disagree.
+`.github/workflows/gateway.yaml` runs the shared quality gate, then `npm run deploy` with
+`KVROCKS_GATEWAY_URL` from repository variables. That one command renders both placeholders and passes
+the resolved slug to wrangler as `--var GITHUB_REPO:...` — the same path a workstation takes, so there
+is a single implementation to trust. The Worker script and every rendered file ship as one version.
 
 Configure once, as repository secrets:
 
@@ -84,15 +85,18 @@ Configure once, as repository secrets:
 The slug comes from the `origin` remote, so only the gateway origin needs supplying:
 
 ```bash
-KVROCKS_GATEWAY_URL=https://repo.example.com npm run deploy   # build + wrangler deploy
-KVROCKS_GATEWAY_URL=https://repo.example.com npm run dev      # build + wrangler dev
-npm test                                                      # unit tests
+KVROCKS_GATEWAY_URL=https://repo.example.com npm run deploy   # render + wrangler deploy
+KVROCKS_GATEWAY_URL=https://repo.example.com npm run dev      # render + wrangler dev
+npm test                                                     # unit tests
 ```
+
+Neither command needs `--var`: `scripts/deploy.mjs` renders first and hands the resolved slug to
+wrangler, because `wrangler deploy` — unlike `wrangler dev` — does not read `.dev.vars`.
 
 Without `KVROCKS_GATEWAY_URL` the page still builds; the installer keeps its placeholder and refuses
 to run until it is given `KVROCKS_REPO_URL`.
 
-`npx wrangler deploy --dry-run` validates the configuration and lists the uploaded assets without
+`npm run deploy -- --dry-run` validates the configuration and lists the uploaded assets without
 touching the account.
 
 ### Repository variables
