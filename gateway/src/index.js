@@ -13,6 +13,9 @@
  *   mix of old and new files small; content-addressed DNF repodata is immutable.
  * - Only GET/HEAD are served. Client headers and query strings are never forwarded upstream, so they can
  *   neither fragment nor bust the cache. Conditional requests for metadata are answered by the Worker.
+ * - An upstream that cannot be reached at all is answered with a plain-text 502 instead of letting the
+ *   rejection surface as Cloudflare's HTML error page: apt and dnf parse bodies, so HTML reads as a
+ *   malformed index rather than a failed fetch.
  */
 
 // Filename conventions: deb `<name>_<version>-<revision>_<arch>.deb`, rpm `<name>-<version>-<release>.<arch>.rpm`.
@@ -70,6 +73,30 @@ function textResponse(body, status, headers = {}) {
   return new Response(body, { status, headers: { "Content-Type": "text/plain", ...headers } });
 }
 
+// 502 is the status class apt (Acquire::Retries, default 3) and dnf (`retries`) both retry as transient, and
+// `no-store` keeps the failure out of every cache. One status for every cause: the rejection reason of fetch()
+// cannot be told apart, and a second code would only make client behaviour harder to predict.
+function badGateway(what) {
+  return textResponse(`Bad Gateway: ${what} could not be reached`, 502, { "Cache-Control": "no-store" });
+}
+
+/**
+ * Calls the upstream, turning a network-layer rejection into `null`.
+ *
+ * fetch() only rejects when no request could be made at all (DNS, TLS, connection reset); upstream error
+ * statuses resolve normally. `null` rather than a synthetic error response keeps "the upstream is unreachable"
+ * distinguishable from "the upstream answered" at the call site.
+ *
+ * @returns {Promise<Response|null>} Upstream response, or null when the request could not be made
+ */
+async function fetchUpstream(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch {
+    return null;
+  }
+}
+
 function isPackagePath(pathname) {
   return (
     (pathname.startsWith("/pool/") && pathname.endsWith(".deb")) ||
@@ -114,7 +141,9 @@ async function handlePackage(request, ctx, repo, pathname) {
   }
 
   // Always GET, even for HEAD: the redirect target is a signed URL that may only be valid for GET.
-  const upstream = await fetch(targetUrl, { headers: upstreamHeaders });
+  const upstream = await fetchUpstream(targetUrl, { headers: upstreamHeaders });
+  if (!upstream) return badGateway("GitHub Releases");
+
   if (!upstream.ok) {
     upstream.body?.cancel();
     return textResponse(
@@ -185,12 +214,13 @@ async function handleMetadata(request, metadataOrigin, pathname) {
   const policy = cachePolicy(pathname);
 
   // Plain string concatenation keeps the target on the configured origin, whatever the path looks like.
-  const upstream = await fetch(`${metadataOrigin.replace(/\/+$/, "")}${pathname}`, {
+  const upstream = await fetchUpstream(`${metadataOrigin.replace(/\/+$/, "")}${pathname}`, {
     cf: {
       cacheEverything: true,
       cacheTtlByStatus: { "200-299": policy.ttl, "404": NEGATIVE_TTL, "500-599": -1 },
     },
   });
+  if (!upstream) return badGateway("the metadata origin");
 
   const headers = new Headers(upstream.headers);
   headers.delete("set-cookie");
