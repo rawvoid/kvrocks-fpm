@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" fill="none">
+  <defs>
+    <linearGradient id="kvTop" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#4ade80"/>
+    </linearGradient>
+    <linearGradient id="kvLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#16a34a"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <linearGradient id="kvRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#15803d"/>
+      <stop offset="100%" stop-color="#14532d"/>
+    </linearGradient>
+    <linearGradient id="kvMTop" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#16a34a"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="kvMLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#15803d"/>
+      <stop offset="100%" stop-color="#166534"/>
+    </linearGradient>
+    <linearGradient id="kvMRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14532d"/>
+      <stop offset="100%" stop-color="#052e16"/>
+    </linearGradient>
+    <linearGradient id="kvBLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#166534"/>
+      <stop offset="100%" stop-color="#14532d"/>
+    </linearGradient>
+    <linearGradient id="kvBRight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14532d"/>
+      <stop offset="100%" stop-color="#022c22"/>
+    </linearGradient>
+    <radialGradient id="kvGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4ade80" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="18" cy="19" rx="16" ry="13" fill="url(#kvGlow)"/>
+  <g transform="translate(0, 14)">
+    <path d="M6 7 L18 14 L30 7 L18 0 Z" fill="#15803d" opacity="0.8"/>
+    <path d="M6 7 L18 14 L18 18 L6 11 Z" fill="url(#kvBLeft)"/>
+    <path d="M18 14 L30 7 L30 11 L18 18 Z" fill="url(#kvBRight)"/>
+    <path d="M6 11 L18 18 L30 11" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.25"/>
+  </g>
+  <g transform="translate(0, 7)">
+    <path d="M6 7 L18 14 L30 7 L18 0 Z" fill="url(#kvMTop)"/>
+    <path d="M6 7 L18 14 L18 18 L6 11 Z" fill="url(#kvMLeft)"/>
+    <path d="M18 14 L30 7 L30 11 L18 18 Z" fill="url(#kvMRight)"/>
+    <path d="M18 0 L6 7 L18 14 L30 7 Z" stroke="#86efac" stroke-width="0.5" stroke-opacity="0.3"/>
+    <path d="M6 11 L18 18 L30 11" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.35"/>
+  </g>
+  <g>
+    <path d="M6 8 L18 15 L18 19 L6 12 Z" fill="url(#kvLeft)"/>
+    <path d="M18 15 L30 8 L30 12 L18 19 Z" fill="url(#kvRight)"/>
+    <path d="M18 1 L30 8 L18 15 L6 8 Z" fill="url(#kvTop)"/>
+    <path d="M18 1 L6 8 L18 15 L30 8 Z" stroke="#bbf7d0" stroke-width="0.6" stroke-opacity="0.8"/>
+    <path d="M18 15 L18 19" stroke="#86efac" stroke-width="0.6" stroke-opacity="0.7"/>
+    <path d="M6 12 L18 19 L30 12" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.45"/>
+    <path d="M18 4.5 L24 8 L18 11.5 L12 8 Z" fill="#ffffff" fill-opacity="0.2"/>
+  </g>
+</svg>

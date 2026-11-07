@@ -19,7 +19,9 @@ gateway/
 ├── scripts/deploy.mjs   # render + wrangler deploy, passing the slug as --var
 ├── public/              # asset *sources*, committed
 │   ├── index.html       # landing page, carries __GITHUB_REPO__
-│   └── install.sh       # installer, carries __REPO_ORIGIN__
+│   ├── install.sh       # installer, carries __REPO_ORIGIN__
+│   ├── favicon.svg      # tab icon, referenced as /favicon.svg
+│   └── _headers         # per-asset caching rules, consumed by the edge
 ├── dist/                # rendered assets, uploaded with the Worker (generated)
 └── .dev.vars            # local GITHUB_REPO for `wrangler dev` (generated)
 ```
@@ -40,6 +42,7 @@ without invoking the Worker**, everything else reaches `src/index.js`.
 | `/` | static asset | Cached at the edge, revalidated by `ETag` |
 | `/index.html` | static asset layer | `307` redirect to `/` (`html_handling` default `auto-trailing-slash`) |
 | `/install.sh` | static asset | The whole script is fixed at build time; no Worker code runs |
+| `/favicon.svg` | static asset | `_headers` gives it `max-age=86400`; the page itself stays revalidated by `ETag` |
 | `/pool/*.deb`, `/rpm/**/*.rpm` | Worker | Streamed from GitHub Releases, cached one year per asset |
 | everything else (`/dists/**`, `kvrocks.{repo,gpg,asc}`) | Worker | Proxied from the metadata origin (GitHub Pages) with per-type TTLs |
 
@@ -50,10 +53,13 @@ without invoking the Worker**, everything else reaches `src/index.js`.
      without calling the GitHub API. Full responses are cached in `caches.default` for one year.
 
 2. **One public origin**
-   - The landing page and the installer are static assets of the same Worker, so opening the page and
-     starting an install stay on one origin. (The release list rendered on the page still calls
-     `api.github.com` directly.)
-   - Neither file is touched at runtime: whatever the build rendered is what the edge serves.
+   - The landing page, the installer and the tab icon are static assets of the same Worker, so opening
+     the page and starting an install stay on one origin. (The release list rendered on the page still
+     calls `api.github.com` directly.)
+   - No asset is touched at runtime: whatever the build rendered is what the edge serves.
+   - The icon is a real file rather than an inline `data:` URI, so browsers cache it once instead of
+     re-downloading it inside every page load. `_headers` keeps it cached for a day while the page and
+     the installer stay revalidated, because those must reflect a deploy immediately.
 
 3. **Global edge delivery**
    - The Worker runs on Cloudflare's anycast network and streams packages to the client as `200 OK` over

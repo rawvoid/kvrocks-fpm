@@ -66,6 +66,15 @@ jobs:
               exit 1
             fi
           done
+          # A root-relative reference points at a file this deploy must ship; a typo would 404 silently.
+          grep -o -E '(href|src)="/[^"]*"' gateway/dist/index.html \
+            | sed -E 's/^[a-z]+="\///; s/"$//' | sort -u > "$RUNNER_TEMP/root-refs.txt"
+          while IFS= read -r ref; do
+            if [ ! -f "gateway/dist/$ref" ]; then
+              echo "::error title=Missing Asset::index.html references /$ref, which is not part of dist/."
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/root-refs.txt"
 
       - name: Run Shellcheck
         run: |
