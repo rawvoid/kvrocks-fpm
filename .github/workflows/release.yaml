@@ -683,7 +683,7 @@ jobs:
             # --omit-baseurl keeps <location> as a filename under the repo baseurl.
             if [ -d "${repo_dir}/repodata" ]; then
               merged_dir=$(mktemp -d)
-              mergerepo_c --all --omit-baseurl --no-database --general-compress-type gz \
+              mergerepo_c --all --omit-baseurl --no-database \
                 --repo "$repo_dir" --repo "$new_repo" -o "$merged_dir"
               new_repodata="${merged_dir}/repodata"
             fi
