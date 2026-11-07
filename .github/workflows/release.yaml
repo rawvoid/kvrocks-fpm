@@ -126,13 +126,6 @@ jobs:
             exit 1
           fi
 
-      - name: Check GitHub Pages Branch
-        run: |
-          if ! git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            echo "::error::gh-pages branch is missing"
-            exit 1
-          fi
-
       - name: Check Publishing Preconditions
         if: ${{ !inputs.dry_run }}
         env:
@@ -541,12 +534,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The gh-pages branch must already exist; it is only ever appended to, never rebuilt.
+      # gh-pages may not exist yet (a fork, or a wiped metadata branch), so this checks the workflow
+      # commit out and moves onto the pages branch below instead of asking for a ref that may be absent.
       - name: Checkout GitHub Pages Branch
         uses: actions/checkout@v7
         with:
-          ref: gh-pages
+          ref: ${{ github.sha }}
           path: pages
+
+      - name: Move onto the GitHub Pages Branch
+        working-directory: pages
+        run: |
+          if git fetch --depth 1 origin gh-pages; then
+            git checkout --quiet -B gh-pages FETCH_HEAD
+          else
+            git checkout --quiet --orphan gh-pages
+            git rm --quiet -rf .
+          fi
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v8
@@ -762,7 +766,7 @@ jobs:
         if: ${{ !inputs.dry_run }}
         working-directory: pages
         run: |
-          git pull --rebase origin gh-pages
+          git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1 && git pull --rebase origin gh-pages
           git push origin gh-pages
 
       - name: Summary

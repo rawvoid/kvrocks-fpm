@@ -34,11 +34,23 @@ jobs:
         with:
           path: main-repo
 
+      # gh-pages may not exist yet, so this checks the workflow commit out and moves onto the pages
+      # branch below instead of asking for a ref that may be absent.
       - name: Checkout GitHub Pages Branch
         uses: actions/checkout@v7
         with:
-          ref: gh-pages
+          ref: ${{ github.sha }}
           path: gh-pages-branch
+
+      - name: Move onto the GitHub Pages Branch
+        working-directory: gh-pages-branch
+        run: |
+          if git fetch --depth 1 origin gh-pages; then
+            git checkout --quiet -B gh-pages FETCH_HEAD
+          else
+            git checkout --quiet --orphan gh-pages
+            git rm --quiet -rf .
+          fi
 
       - name: Sync Assets to gh-pages
         run: |
