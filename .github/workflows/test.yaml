@@ -53,6 +53,20 @@ jobs:
             console.log('gateway/public/index.html inline scripts validated successfully.');
           "
 
+      # The deploy uploads the rendered copy, so a placeholder left behind would ship a broken page or an
+      # installer that refuses to run. A dummy origin exercises the origin substitution too.
+      - name: Render Static Assets
+        env:
+          KVROCKS_GATEWAY_URL: https://repo.example.com
+        run: |
+          npm --prefix gateway run build
+          for placeholder in __GITHUB_REPO__ __REPO_ORIGIN__; do
+            if grep -rn "$placeholder" gateway/dist; then
+              echo "::error title=Unrendered Placeholder::${placeholder} survived rendering in the assets above."
+              exit 1
+            fi
+          done
+
       - name: Run Shellcheck
         run: |
           shellcheck gateway/public/*.sh packaging/hooks/*.sh
