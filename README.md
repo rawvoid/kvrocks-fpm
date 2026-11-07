@@ -36,7 +36,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 ## 🚀 Installation & Usage
 
 > [!TIP]
-> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions. The landing page, the installer and the repository metadata are served from that same edge origin.
+> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](../../releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions. The landing page, the installer and the repository metadata are served from that same edge origin.
 
 > [!NOTE]
 > **System Requirements**: Requires Linux with `glibc >= 2.35` (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+). Older distributions without glibc 2.35 can run Kvrocks via Docker.
@@ -54,9 +54,9 @@ curl -fsSL https://<gateway-origin>/install.sh | sudo bash
 curl -fsSL https://<gateway-origin>/install.sh | sudo KVROCKS_CHANNEL=testing bash
 ```
 
-The installer installs from the origin it was downloaded from, so it works unchanged behind any
-gateway host. When the script has been copied off the gateway, set `KVROCKS_REPO_URL` to the repository
-origin before running it.
+The installer installs from the repository origin baked in at deploy time, so it needs nothing from
+the machine it runs on. When the script has been copied off that origin, set `KVROCKS_REPO_URL` to the
+repository origin before running it.
 
 Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; a failed service operation never aborts the package transaction.
 
