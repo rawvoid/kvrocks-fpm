@@ -388,6 +388,20 @@ test("worker.fetch - Package upstream errors are passed through, never cached", 
   assert.equal(cache.store.size, 0);
 });
 
+test("worker.fetch - Package upstream network failure returns a plain-text 502, never cached", async () => {
+  const { res, cache } = await call(PKG_PATH, {
+    upstream: () => {
+      throw new TypeError("fetch failed");
+    },
+  });
+
+  assert.equal(res.status, 502);
+  assert.equal(res.headers.get("content-type"), "text/plain");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  assert.match(await res.text(), /GitHub Releases/);
+  assert.equal(cache.store.size, 0);
+});
+
 // --- Metadata ---------------------------------------------------------------
 
 test("worker.fetch - Root path is proxied verbatim, without forwarding client headers or query string", async () => {
@@ -465,6 +479,19 @@ test("worker.fetch - Metadata errors never get a long Cache-Control", async () =
   const badGateway = await call("/dists/stable/InRelease", { upstream: () => new Response("", { status: 502 }) });
   assert.equal(badGateway.res.status, 502);
   assert.equal(badGateway.res.headers.get("cache-control"), "no-store");
+});
+
+test("worker.fetch - Metadata upstream network failure returns a plain-text 502, never pinned", async () => {
+  const { res } = await call("/dists/stable/InRelease", {
+    upstream: () => {
+      throw new TypeError("fetch failed");
+    },
+  });
+
+  assert.equal(res.status, 502);
+  assert.equal(res.headers.get("content-type"), "text/plain");
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  assert.match(await res.text(), /metadata origin/);
 });
 
 test("worker.fetch - Metadata drops set-cookie and HEAD returns no body", async () => {
