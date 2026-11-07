@@ -36,7 +36,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 ## 🚀 Installation & Usage
 
 > [!TIP]
-> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions.
+> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](https://github.com/rawvoid/kvrocks-fpm/releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions. The landing page, the installer and the repository metadata are served from that same edge origin.
 
 > [!NOTE]
 > **System Requirements**: Requires Linux with `glibc >= 2.35` (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+). Older distributions without glibc 2.35 can run Kvrocks via Docker.
@@ -47,11 +47,16 @@ The universal installer automatically detects your Linux distribution family, ha
 
 ```bash
 # Install from Stable channel (default)
-curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo bash
+# The landing page prints this command with the gateway host filled in.
+curl -fsSL https://<gateway-origin>/install.sh | sudo bash
 
 # Install from Testing channel (pre-releases / release candidates)
-curl -fsSL https://rawvoid.github.io/kvrocks-fpm/install.sh | sudo KVROCKS_CHANNEL=testing bash
+curl -fsSL https://<gateway-origin>/install.sh | sudo KVROCKS_CHANNEL=testing bash
 ```
+
+The installer installs from the origin it was downloaded from, so it works unchanged behind any
+gateway host. When the script has been copied off the gateway, set `KVROCKS_REPO_URL` to the repository
+origin before running it.
 
 Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; a failed service operation never aborts the package transaction.
 
@@ -179,7 +184,9 @@ Packages are built and published on-demand via GitHub Actions (`workflow_dispatc
 
 Publishing creates a draft GitHub Release, makes it public, and then deploys metadata to `gh-pages`. Metadata is pushed once; a failure stops the workflow without retrying, deleting, or re-creating the public Release.
 
-Repository requirements: the `gh-pages` branch must exist (it is checked even for dry runs and can be empty of packages), repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
+`gh-pages` holds repository metadata only (`dists/`, `rpm/`, `kvrocks.gpg`, `kvrocks.asc`, `kvrocks.repo`, `.nojekyll`); the workflow audits that whitelist before committing. The landing page and the installer are static assets of the edge gateway Worker and ship through `.github/workflows/gateway.yaml`, independently of releases.
+
+Repository requirements: the `gh-pages` branch is created on the first run when it does not exist yet, repository variable `KVROCKS_GATEWAY_URL` must point at the edge gateway, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
 
 **Pre-release versions**: `2.15.0-rc1` packages are built with internal package version `2.15.0~rc1` (the `~` ensures APT/DNF recognize that `2.15.0~rc1 < 2.15.0`, so upgrading to the GA release is seamless when both versions are visible to the package manager). The installer always configures the stable APT channel and adds testing when selected, so testing users can see later GA releases. The suffix is a single identifier such as `rc1` or `rc.1`; a hyphen is rejected because RPM `Version` cannot contain `-`. External artifacts and release tags retain the standard naming (e.g. `kvrocks_2.15.0-rc1-1_amd64.deb`, tag `v2.15.0-rc1-1`).
 
