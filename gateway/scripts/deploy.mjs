@@ -18,10 +18,12 @@ const gatewayDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const { slug } = render();
 
-// Extra arguments go to wrangler untouched, so `npm run deploy -- --dry-run --outdir /tmp/out` works.
+// Pinned major keeps CI and workstations on the same CLI; `--yes` keeps a non-interactive runner from
+// stalling on the install prompt. Extra arguments go to wrangler untouched, so
+// `npm run deploy -- --dry-run --outdir /tmp/out` works.
 const { status } = spawnSync(
   "npx",
-  ["wrangler", "deploy", "--var", `GITHUB_REPO:${slug}`, ...process.argv.slice(2)],
+  ["--yes", "wrangler@4", "deploy", "--var", `GITHUB_REPO:${slug}`, ...process.argv.slice(2)],
   { cwd: gatewayDir, stdio: "inherit" }
 );
 

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/render.mjs",
     "test": "node --test test/worker.test.js",
-    "dev": "node scripts/render.mjs && npx wrangler dev",
+    "dev": "node scripts/render.mjs && npx --yes wrangler@4 dev",
     "deploy": "node scripts/deploy.mjs"
   },
   "keywords": [
