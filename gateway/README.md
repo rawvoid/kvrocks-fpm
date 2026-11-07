@@ -22,7 +22,8 @@ without invoking the Worker**, everything else reaches `src/index.js`.
 
 | Request | Served by | Notes |
 |---|---|---|
-| `/`, `/index.html` | static asset | Cached at the edge, revalidated by `ETag` |
+| `/` | static asset | Cached at the edge, revalidated by `ETag` |
+| `/index.html` | static asset layer | `307` redirect to `/` (`html_handling` default `auto-trailing-slash`) |
 | `/install.sh` | Worker + asset | `run_worker_first` routes it through the Worker, which fills in the origin it was downloaded from |
 | `/pool/*.deb`, `/rpm/**/*.rpm` | Worker | Streamed from GitHub Releases, cached one year per asset |
 | everything else (`/dists/**`, `kvrocks.{repo,gpg,asc}`) | Worker | Proxied from the metadata origin (GitHub Pages) with per-type TTLs |
@@ -34,8 +35,9 @@ without invoking the Worker**, everything else reaches `src/index.js`.
      without calling the GitHub API. Full responses are cached in `caches.default` for one year.
 
 2. **One public origin**
-   - The landing page and the installer are static assets of the same Worker, so clients never touch
-     GitHub to read the page, copy the install command, or start an install.
+   - The landing page and the installer are static assets of the same Worker, so opening the page and
+     starting an install stay on one origin. (The release list rendered on the page still calls
+     `api.github.com` directly — see *Forking*.)
    - `install.sh` is served with `__REPO_ORIGIN__` replaced by the request origin: the same file works
      behind a custom domain, a `*.workers.dev` host or a fork, with no build step and no config.
 
@@ -73,17 +75,22 @@ touching the account.
 
 ### Forking
 
-`wrangler.toml` holds one project-specific value:
+Routing and the installer need exactly one project-specific value in `wrangler.toml`:
 
 ```toml
 [vars]
 GITHUB_REPO = "owner/repo"
 ```
 
-Release assets are read from that repository, and the metadata origin defaults to its GitHub Pages
-project site (`https://<owner>.github.io/<repo>`). Set `METADATA_ORIGIN` only when the metadata lives
-on a custom domain. Bind your own custom domain under **Settings → Domains & Routes**; nothing in the
-code or the assets embeds a hostname.
+Release assets are read from that repository, the metadata origin defaults to its GitHub Pages project
+site (`https://<owner>.github.io/<repo>`), and `/install.sh` installs from whatever host serves it. No
+hostname is baked into either. Set `METADATA_ORIGIN` only when the metadata lives on a custom domain,
+and bind your own custom domain under **Settings → Domains & Routes**.
+
+`public/index.html` is the exception: it links to the upstream repository and reads its release list
+directly from `api.github.com` (see the repo slug at the links and in `fetchReleases`/`loadMoreReleases`),
+so a fork must edit those before deploying its own page. Serving that slug and the release list from
+the Worker is still on the to-do list; until it lands the page is upstream-specific.
 
 ---
 
