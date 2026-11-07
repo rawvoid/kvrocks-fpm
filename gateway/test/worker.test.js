@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { resolveReleaseDownloadUrl } from "./worker.js";
+import worker, { resolveReleaseDownloadUrl } from "../src/index.js";
 
 // Test-only generic fixtures to ensure decoupling from production configuration
 const TEST_REPO = "test-owner/test-repo";

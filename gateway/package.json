@@ -4,7 +4,7 @@
   "description": "Cloudflare Worker edge gateway for Apache Kvrocks APT & RPM package repository",
   "type": "module",
   "scripts": {
-    "test": "node --test worker.test.js",
+    "test": "node --test test/worker.test.js",
     "deploy": "npx wrangler deploy"
   },
   "keywords": [

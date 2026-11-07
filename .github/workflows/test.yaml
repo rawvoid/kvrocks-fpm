@@ -42,7 +42,7 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
-            const html = fs.readFileSync('web/index.html', 'utf8');
+            const html = fs.readFileSync('gateway/public/index.html', 'utf8');
             const scripts = html.match(/<script[\s\S]*?<\/script>/gi) || [];
             for (const s of scripts) {
               if (!s.includes('src=')) {
@@ -50,9 +50,9 @@ jobs:
                 new Function(code);
               }
             }
-            console.log('web/index.html inline scripts validated successfully.');
+            console.log('gateway/public/index.html inline scripts validated successfully.');
           "
 
       - name: Run Shellcheck
         run: |
-          shellcheck scripts/*.sh packaging/hooks/*.sh
+          shellcheck gateway/public/*.sh packaging/hooks/*.sh
