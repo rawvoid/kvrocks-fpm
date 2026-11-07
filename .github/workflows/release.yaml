@@ -645,6 +645,9 @@ jobs:
 
           cd "$release_dir"
           rm -f Release InRelease Release.gpg
+          # `release .` hashes every file in this directory, so the output cannot be created here before
+          # the scan: `> Release` truncates it first and the file then lists its own header. Write outside
+          # the scanned tree and move it in afterwards.
           apt-ftparchive \
             -o APT::FTPArchive::Release::Origin="Apache Kvrocks Packages" \
             -o APT::FTPArchive::Release::Label="Kvrocks" \
@@ -653,7 +656,8 @@ jobs:
             -o APT::FTPArchive::Release::Architectures="${arches[*]}" \
             -o APT::FTPArchive::Release::Components="main" \
             -o APT::FTPArchive::Release::Description="Apache Kvrocks Debian/Ubuntu APT Repository (${CHANNEL})" \
-            release . > Release
+            release . > "$RUNNER_TEMP/Release"
+          mv "$RUNNER_TEMP/Release" Release
 
       - name: Sign APT Repository
         if: ${{ !inputs.dry_run }}
