@@ -4,5 +4,14 @@ compatibility_date = "2024-09-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
+# `owner/repo` of this repository: release assets are streamed from it, and the GitHub Pages origin
+# that serves the metadata is derived from it (`https://<owner>.github.io/<repo>`), so a fork only
+# changes this one value. Set METADATA_ORIGIN to override the derived origin (custom Pages domain).
 GITHUB_REPO = "rawvoid/kvrocks-fpm"
-METADATA_ORIGIN = "https://rawvoid.github.io/kvrocks-fpm"
+
+[assets]
+# Landing page and installer are Static Assets: an asset hit never runs the Worker. Only the installer
+# is routed through it, to fill in the origin it was downloaded from.
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/install.sh"]

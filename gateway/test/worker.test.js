@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker, { resolveReleaseDownloadUrl } from "../src/index.js";
+import worker, { resolveMetadataOrigin, resolveReleaseDownloadUrl } from "../src/index.js";
 
 // Test-only generic fixtures to ensure decoupling from production configuration
 const TEST_REPO = "test-owner/test-repo";
@@ -227,11 +227,21 @@ test("worker.fetch - Only GET and HEAD are served", async () => {
 });
 
 test("worker.fetch - Missing environment variables returns 500 (Fail-Fast)", async () => {
-  for (const env of [{}, { GITHUB_REPO: TEST_REPO }, { METADATA_ORIGIN: TEST_METADATA_ORIGIN }]) {
+  for (const env of [{}, { METADATA_ORIGIN: TEST_METADATA_ORIGIN }]) {
     const { res, fetchCalls } = await call(PKG_PATH, { env });
     assert.equal(res.status, 500);
     assert.equal(fetchCalls.length, 0);
   }
+});
+
+test("resolveMetadataOrigin - Derived from GITHUB_REPO, overridden by METADATA_ORIGIN", () => {
+  assert.equal(resolveMetadataOrigin({ GITHUB_REPO: TEST_REPO }), "https://test-owner.github.io/test-repo");
+  assert.equal(
+    resolveMetadataOrigin({ GITHUB_REPO: TEST_REPO, METADATA_ORIGIN: "https://pages.example.com" }),
+    "https://pages.example.com"
+  );
+  assert.equal(resolveMetadataOrigin({}), null);
+  assert.equal(resolveMetadataOrigin({ GITHUB_REPO: "no-slash" }), null);
 });
 
 test("worker.fetch - Invalid package naming returns 404 without contacting upstream", async () => {
@@ -380,14 +390,14 @@ test("worker.fetch - Package upstream errors are passed through, never cached", 
 
 // --- Metadata ---------------------------------------------------------------
 
-test("worker.fetch - Root path proxies /index.html without forwarding client headers or query string", async () => {
+test("worker.fetch - Root path is proxied verbatim, without forwarding client headers or query string", async () => {
   const { res, fetchCalls } = await call("/?rand=42", {
     headers: { Cookie: "session=xyz", "User-Agent": "Custom-Agent", Range: "bytes=0-100" },
     upstream: () => new Response("<html></html>", { headers: { "Content-Type": "text/html" } }),
   });
 
   assert.equal(res.status, 200);
-  assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}/index.html`);
+  assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}/`);
   assert.equal(fetchCalls[0].init.headers, undefined);
   assert.equal(res.headers.has("access-control-allow-origin"), false);
 });
@@ -397,8 +407,8 @@ test("worker.fetch - Metadata target always stays on the configured origin", asy
   assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}//evil.example.net/x`);
 
   const prefixed = { ...TEST_ENV, METADATA_ORIGIN: "https://pages.example.com/project/" };
-  const { fetchCalls: prefixedCalls } = await call("/install.sh", { env: prefixed });
-  assert.equal(prefixedCalls[0].url, "https://pages.example.com/project/install.sh");
+  const { fetchCalls: prefixedCalls } = await call("/kvrocks.repo", { env: prefixed });
+  assert.equal(prefixedCalls[0].url, "https://pages.example.com/project/kvrocks.repo");
 });
 
 test("worker.fetch - Metadata Cache-Control policy per resource type", async () => {
@@ -423,7 +433,6 @@ test("worker.fetch - Metadata Cache-Control policy per resource type", async () 
     "public, max-age=86400, s-maxage=86400": ["/kvrocks.asc", "/kvrocks.gpg"],
     "public, max-age=600, s-maxage=600": [
       "/",
-      "/install.sh",
       "/kvrocks.repo",
       "/rpm/stable/x86_64/repodata/comps.xml",
       "/rpm/stable/x86_64/repodata/productid.xml.gz",
@@ -459,14 +468,14 @@ test("worker.fetch - Metadata errors never get a long Cache-Control", async () =
 });
 
 test("worker.fetch - Metadata drops set-cookie and HEAD returns no body", async () => {
-  const get = await call("/install.sh", {
+  const get = await call("/kvrocks.repo", {
     upstream: () => new Response("echo", { headers: { "Set-Cookie": "a=b", "Content-Type": "text/plain" } }),
   });
   assert.equal(get.res.headers.has("set-cookie"), false);
   assert.equal(get.res.headers.get("content-type"), "text/plain");
   assert.equal(await get.res.text(), "echo");
 
-  const head = await call("/install.sh", { method: "HEAD", upstream: () => new Response("echo") });
+  const head = await call("/kvrocks.repo", { method: "HEAD", upstream: () => new Response("echo") });
   assert.equal(head.res.status, 200);
   assert.equal(head.res.body, null);
 });
@@ -523,4 +532,51 @@ test("worker.fetch - Conditional headers never turn errors into 304", async () =
     upstream: () => new Response("Not Found", { status: 404 }),
   });
   assert.equal(res.status, 404);
+});
+
+// --- Installer --------------------------------------------------------------
+
+const INSTALLER_SOURCE = "#!/usr/bin/env bash\nREPO_ORIGIN=__REPO_ORIGIN__\n";
+
+function assetsEnv(response = () => new Response(INSTALLER_SOURCE)) {
+  return { ...TEST_ENV, ASSETS: { fetch: async () => response() } };
+}
+
+const failUpstream = () => {
+  throw new Error("the installer must never reach the metadata origin");
+};
+
+test("worker.fetch - /install.sh is served by the Worker with the origin it was downloaded from", async () => {
+  const { res, fetchCalls } = await call("/install.sh?x=1", { env: assetsEnv(), upstream: failUpstream });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+  assert.equal(res.headers.get("cache-control"), "public, max-age=300");
+  assert.equal(await res.text(), `#!/usr/bin/env bash\nREPO_ORIGIN=https://kvrocks-repo.example.com\n`);
+  assert.equal(fetchCalls.length, 0);
+});
+
+test("worker.fetch - /install.sh HEAD returns the headers without a body", async () => {
+  const { res } = await call("/install.sh", { method: "HEAD", env: assetsEnv() });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+  assert.equal(await res.text(), "");
+});
+
+test("worker.fetch - /install.sh passes an asset miss through instead of proxying it", async () => {
+  const { res, fetchCalls } = await call("/install.sh", {
+    env: assetsEnv(() => new Response("Not Found", { status: 404 })),
+    upstream: failUpstream,
+  });
+
+  assert.equal(res.status, 404);
+  assert.equal(fetchCalls.length, 0);
+});
+
+test("worker.fetch - /install.sh without the ASSETS binding fails fast", async () => {
+  const { res, fetchCalls } = await call("/install.sh", { env: TEST_ENV, upstream: failUpstream });
+
+  assert.equal(res.status, 500);
+  assert.equal(fetchCalls.length, 0);
 });
