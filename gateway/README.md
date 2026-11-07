@@ -55,9 +55,9 @@ without invoking the Worker**, everything else reaches `src/index.js`.
      `api.github.com` directly.)
    - Neither file is touched at runtime: whatever the build rendered is what the edge serves.
 
-3. **Mainland China accessibility**
-   - The Worker runs on Cloudflare's anycast network, where GitHub is reachable, and streams packages to
-     the client as `200 OK` over a `ReadableStream` instead of redirecting back to GitHub.
+3. **Global edge delivery**
+   - The Worker runs on Cloudflare's anycast network and streams packages to the client as `200 OK` over
+     a `ReadableStream` instead of redirecting to GitHub, so a download never waits on a second origin.
    - Only `GET`/`HEAD` are served, and client headers/query strings are never forwarded upstream, so
      caches cannot be fragmented or busted.
 

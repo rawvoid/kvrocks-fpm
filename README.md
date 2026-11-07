@@ -36,7 +36,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 ## 🚀 Installation & Usage
 
 > [!TIP]
-> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](../../releases) and cached globally at Cloudflare Edge nodes, providing fast, unblocked downloads worldwide with zero storage restrictions. The landing page, the installer and the repository metadata are served from that same edge origin.
+> **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](../../releases) and cached globally at Cloudflare Edge nodes, providing fast downloads worldwide with zero storage restrictions. The landing page, the installer and the repository metadata are served from that same edge origin.
 
 > [!NOTE]
 > **System Requirements**: Requires Linux with `glibc >= 2.35` (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+). Older distributions without glibc 2.35 can run Kvrocks via Docker.
