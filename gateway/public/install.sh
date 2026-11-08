@@ -369,7 +369,7 @@ EOF
         printf '  • %-18s %b\n' "View logs:" "${CYAN}sudo journalctl -u kvrocks -f${NC}"
     else
         printf '  • %-18s %b\n' "Start service:" "${CYAN}kvrocks -c /etc/kvrocks/kvrocks.conf${NC}"
-        printf '  • %-18s %b\n' "View logs:" "${CYAN}tail -f /var/log/kvrocks/kvrocks_*.log${NC}"
+        printf '  • %-18s %b\n' "Log directory:" "${CYAN}/var/log/kvrocks/${NC}"
     fi
     printf '  • %-18s %b\n' "Connect:" "${CYAN}redis-cli -p 6666 ping${NC}"
     printf '  • %-18s %b\n\n' "Configuration:" "${CYAN}/etc/kvrocks/kvrocks.conf${NC}"

@@ -15,7 +15,7 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 - **Standard Linux Filesystem Layout**: Conforms to FHS (Filesystem Hierarchy Standard).
 - **Systemd Integration & Lifecycle Hooks**: Automatic system user `kvrocks` creation, permission initialization, and `systemd` daemon reload.
 - **Enterprise Capabilities**: Built with OpenSSL/TLS (`ENABLE_OPENSSL=ON`), Link-Time Optimization (`ENABLE_LTO=ON`), and Jemalloc memory allocator.
-- **Production Log Management**: Native daily date-based log rotation (`kvrocks_YYYY-MM-DD.log`) with automated 30-day retention cleanup (`log-retention-days 30`).
+- **Production Log Management**: Rotation and retention are delegated to Kvrocks itself — the package ships no `logrotate` configuration and keeps 30 days of history.
 - **Upstream Configuration Baseline**: Retains pristine official template at `/usr/share/doc/kvrocks/kvrocks.conf.default` for instant diffing and auditability.
 - **Automated Checksums & Detached Debug Symbols**: Every release includes `SHA256SUMS` and companion debug symbol archives (`kvrocks[-legacy]-debuginfo_*.tar.gz`) for non-intrusive production coredump and profiling analysis.
 
@@ -89,10 +89,9 @@ sudo systemctl status kvrocks
 
 # View systemd service lifecycle
 sudo journalctl -u kvrocks -f
-
-# View live database engine logs (native date-based logfile)
-sudo tail -f /var/log/kvrocks/kvrocks_$(date +%F).log
 ```
+
+Database engine logs are written to `/var/log/kvrocks/`.
 
 Test connection using `redis-cli`:
 ```bash
@@ -137,7 +136,7 @@ perf report --symfs .
 | `/usr/share/doc/kvrocks/kvrocks2redis.conf.default` | Pristine upstream Redis migration configuration reference |
 | `/usr/lib/systemd/system/kvrocks.service` | Systemd service unit |
 | `/var/lib/kvrocks/` | Working & database storage directory (owned by `kvrocks:kvrocks`) |
-| `/var/log/kvrocks/` | Server log directory (`kvrocks_YYYY-MM-DD.log`, owned by `kvrocks:kvrocks`) |
+| `/var/log/kvrocks/` | Server log directory (owned by `kvrocks:kvrocks`) |
 | `/usr/share/doc/kvrocks/` | License, Notice, and upstream reference documentation |
 
 > **Tip**: You can compare your active configuration against the pristine upstream defaults with colored output at any time:
