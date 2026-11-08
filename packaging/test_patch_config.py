@@ -45,21 +45,79 @@ class TestPatchConfig(unittest.TestCase):
         self.assertNotIn("/tmp/old", content)
 
     def test_insert_below_commented_directive(self):
-        self._write_conf("# log-dir /tmp/kvrocks,stdout\n# supervised no\n")
+        self._write_conf(
+            "# You can configure where to store your server logs by the log-dir.\n"
+            "# `log-dir` can contain multiple destinations, separated by comma (,).\n"
+            "# log-dir /tmp/kvrocks,stdout\n"
+            "# supervised no\n"
+        )
         patch_config(self.conf_path, {
             "log-dir": "/var/log/kvrocks",
             "supervised": "systemd",
         })
         content = self._read_conf()
+        # The prose above mentions the key; only the commented-out directive matches.
         self.assertIn("# log-dir /tmp/kvrocks,stdout\nlog-dir /var/log/kvrocks\n", content)
         self.assertIn("# supervised no\nsupervised systemd\n", content)
 
-    def test_append_missing_directive(self):
+    def test_missing_directive_aborts(self):
+        import io
+        from contextlib import redirect_stderr
+
         self._write_conf("port 6666\n")
-        patch_config(self.conf_path, {"dir": "/var/lib/kvrocks"})
-        content = self._read_conf()
-        self.assertTrue(content.endswith("dir /var/lib/kvrocks\n"))
-        self.assertIn("port 6666\n", content)
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                patch_config(self.conf_path, {"dir": "/var/lib/kvrocks"})
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("dir", stderr.getvalue())
+        # Nothing is written back, so the shipped config never carries a setting the
+        # target Kvrocks version does not understand.
+        self.assertEqual(self._read_conf(), "port 6666\n")
+
+    def test_missing_directives_reported_together(self):
+        import io
+        from contextlib import redirect_stderr
+
+        self._write_conf("dir /tmp/kvrocks\n")
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                patch_config(self.conf_path, {
+                    "dir": "/var/lib/kvrocks",
+                    "log-dir": "/var/log/kvrocks",
+                    "log-retention-days": "30",
+                })
+        self.assertEqual(cm.exception.code, 1)
+        message = stderr.getvalue()
+        self.assertIn("log-dir", message)
+        self.assertIn("log-retention-days", message)
+        # The present directive is not committed either: the file stays untouched.
+        self.assertEqual(self._read_conf(), "dir /tmp/kvrocks\n")
+
+    def test_key_mentioned_in_comment_is_not_a_directive(self):
+        import io
+        from contextlib import redirect_stderr
+
+        # Verbatim comment lines from upstream kvrocks.conf: they mention the keys but
+        # are not commented-out directives, so patching must abort instead of treating
+        # the configuration as already carrying them.
+        self._write_conf(
+            "# By default the log-retention-days is -1.\n"
+            "#   supervised no      - no supervision interaction\n"
+        )
+        for key in ("log-retention-days", "supervised"):
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as cm:
+                    patch_config(self.conf_path, {key: "30"})
+            self.assertEqual(cm.exception.code, 1)
+            self.assertIn(key, stderr.getvalue())
+
+    def test_patch_lines_returns_none_when_directive_is_absent(self):
+        self.assertIsNone(
+            patch_config_module.patch_lines(["port 6666\n"], "dir", "/var/lib/kvrocks")
+        )
 
     def test_idempotency(self):
         initial = (
