@@ -33,3 +33,21 @@ Homepage: https://kvrocks.apache.org
 Description: A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol
 License: Apache-2.0
 Vendor: rawvoid
+
+Package: kvrocks
+Version: 2.15.0-1
+Architecture: arm64
+Maintainer: rawvoid <rawvoid@users.noreply.github.com>
+Installed-Size: 34229
+Depends: libc6 (>= 2.35), libssl3 | libssl3t64, init-system-helpers
+Filename: pool/main/kvrocks_2.15.0-1_arm64.deb
+Size: 15223008
+MD5sum: 79865934e63619cbaabc6758d02c7ef1
+SHA1: 3289d6edfbc1b28b0992b78b20a08eb9eb02aa9d
+SHA256: e688fa8e343181cf625cf83905d22728dd79c0e716f8291b07b5de9278cae13b
+Section: database
+Priority: optional
+Homepage: https://kvrocks.apache.org
+Description: A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol
+License: Apache-2.0
+Vendor: rawvoid
