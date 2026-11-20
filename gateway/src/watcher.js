@@ -11,12 +11,20 @@ const DEFAULT_RELEASE_REF = "main";
 const RELEASE_WORKFLOW = "release.yaml";
 
 // Matches the upstream version syntax accepted by .github/workflows/release.yaml (e.g. 2.17.0, 2.17.0-rc1).
+const VERSION_CORE = "[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:\\.[0-9A-Za-z]+)*)?";
 const UPSTREAM_VERSION_RE = /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$/;
-const UPSTREAM_TAG_RE = /^(?:refs\/tags\/)?v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)$/;
-const PACKAGED_TAG_RE = /^(?:refs\/tags\/)?v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)-[1-9][0-9]*$/;
+const UPSTREAM_TAG_RE = new RegExp(`^(?:refs/tags/)?v(${VERSION_CORE})$`);
+const PACKAGED_TAG_RE = new RegExp(`^(?:refs/tags/)?v(${VERSION_CORE})-[1-9][0-9]*$`);
 // Deliberately excludes `(dry-run)` run titles so dry runs never suppress an automated release.
-const RELEASE_RUN_TITLE_RE = /^Release vv?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?)-[1-9][0-9]*$/;
-const RELEASE_RUN_ANY_TITLE_RE = /^Release v(.+)-[1-9][0-9]*$/;
+const RELEASE_RUN_TITLE_RE = new RegExp(`^Release vv?(${VERSION_CORE})-[1-9][0-9]*$`);
+const RELEASE_RUN_ANY_TITLE_RE = /^Release vv?(.+)-[1-9][0-9]*$/;
+
+const isPrerelease = (version) => version.includes("-");
+
+function minorSeries(version) {
+  const { major, minor } = parseVersion(version);
+  return `${major}.${minor}`;
+}
 
 function parseVersion(version) {
   const match = String(version ?? "").match(UPSTREAM_VERSION_RE);
@@ -166,7 +174,14 @@ export function selectPendingReleaseVersions(upstreamTags, packagedReleases, wor
     (run) => run?.display_title ?? ""
   );
   const knownVersions = [...new Set([...packagedVersions, ...dispatchedVersions])].sort(compareVersions);
-  const baseline = knownVersions.at(-1) ?? null;
+  const knownSet = new Set(knownVersions);
+  const overallBaseline = knownVersions.at(-1) ?? null;
+  const stableKnown = knownVersions.filter((v) => !isPrerelease(v));
+  const stableBaseline = stableKnown.at(-1) ?? null;
+  const seriesStableBaseline = new Map();
+  for (const version of stableKnown) {
+    seriesStableBaseline.set(minorSeries(version), version);
+  }
 
   const dispatchedRawVersions = new Set(dispatchedVersions);
   for (const run of nonDryRuns) {
@@ -174,18 +189,25 @@ export function selectPendingReleaseVersions(upstreamTags, packagedReleases, wor
     if (match) dispatchedRawVersions.add(match[1]);
   }
 
-  if (baseline === null) {
+  if (overallBaseline === null) {
     const newestName = String(getTagText(upstreamTags[0]) ?? "").replace(/^refs\/tags\//, "");
     if (newestName && !UPSTREAM_TAG_RE.test(newestName)) {
       const rawVersion = newestName.replace(/^v/, "");
-      return dispatchedRawVersions.has(rawVersion) ? [] : [rawVersion];
+      return rawVersion && !dispatchedRawVersions.has(rawVersion) ? [rawVersion] : [];
     }
     const upstreamVersions = extractVersions(upstreamTags, UPSTREAM_TAG_RE, getTagText);
-    const latest = dropSupersededPrereleases(upstreamVersions).at(-1);
-    return latest ? [latest] : [];
+    const deduped = dropSupersededPrereleases(upstreamVersions);
+    const latest = deduped.at(-1);
+    if (!latest) return [];
+    if (isPrerelease(latest)) {
+      const latestStable = deduped.filter((v) => !isPrerelease(v)).at(-1);
+      if (latestStable) return [latestStable, latest];
+    }
+    return [latest];
   }
 
   const validNew = new Set();
+  const bootstrapStables = [];
   const invalidNew = [];
   let seenBaselineOrOlder = false;
 
@@ -196,17 +218,36 @@ export function selectPendingReleaseVersions(upstreamTags, packagedReleases, wor
     const match = rawName.match(UPSTREAM_TAG_RE);
     if (match) {
       const version = match[1];
-      if (compareVersions(version, baseline) <= 0) {
+      if (compareVersions(version, overallBaseline) <= 0) {
         seenBaselineOrOlder = true;
-      } else {
+      }
+      if (knownSet.has(version)) continue;
+
+      if (!isPrerelease(version)) {
+        if (stableBaseline === null) {
+          bootstrapStables.push(version);
+        } else if (compareVersions(version, stableBaseline) > 0) {
+          validNew.add(version);
+        } else {
+          const seriesBaseline = seriesStableBaseline.get(minorSeries(version));
+          if (seriesBaseline && compareVersions(version, seriesBaseline) > 0) {
+            validNew.add(version);
+          }
+        }
+      } else if (compareVersions(version, overallBaseline) > 0) {
         validNew.add(version);
       }
     } else if (!seenBaselineOrOlder) {
       const rawVersion = rawName.replace(/^v/, "");
-      if (!dispatchedRawVersions.has(rawVersion) && !invalidNew.includes(rawVersion)) {
+      if (rawVersion && !dispatchedRawVersions.has(rawVersion) && !invalidNew.includes(rawVersion)) {
         invalidNew.push(rawVersion);
       }
     }
+  }
+
+  if (bootstrapStables.length > 0) {
+    bootstrapStables.sort(compareVersions);
+    validNew.add(bootstrapStables.at(-1));
   }
 
   const candidates = dropSupersededPrereleases([...validNew].sort(compareVersions));
@@ -267,7 +308,7 @@ export async function checkAndDispatchRelease(env) {
       "packaged releases"
     ),
     fetchGitHub(
-      `https://api.github.com/repos/${githubRepo}/actions/workflows/${RELEASE_WORKFLOW}/runs?event=workflow_dispatch&per_page=20`,
+      `https://api.github.com/repos/${githubRepo}/actions/workflows/${RELEASE_WORKFLOW}/runs?event=workflow_dispatch&per_page=100`,
       { headers },
       "workflow runs"
     ),
@@ -285,9 +326,6 @@ export async function checkAndDispatchRelease(env) {
     packagedReleases,
     runsData?.workflow_runs ?? []
   );
-  if (versions.length === 0) {
-    return { dispatched: false, versions: [] };
-  }
 
   // Dispatch oldest-to-newest sequentially so release.yaml (`queue: max`) processes them in order.
   for (const version of versions) {
@@ -303,5 +341,7 @@ export async function checkAndDispatchRelease(env) {
     await dispatchRes.body?.cancel();
   }
 
-  return { dispatched: true, versions };
+  const dispatched = versions.length > 0;
+  console.log(JSON.stringify({ event: "watcher", upstreamRepo, githubRepo, dispatched, versions }));
+  return { dispatched, versions };
 }

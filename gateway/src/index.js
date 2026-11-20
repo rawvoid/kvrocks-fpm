@@ -33,9 +33,7 @@ export default {
       : handleMetadata(request, metadataOrigin, pathname);
   },
 
-  async scheduled(controller, env, ctx) {
-    const task = checkAndDispatchRelease(env);
-    ctx?.waitUntil?.(task);
-    return task;
+  async scheduled(controller, env) {
+    return checkAndDispatchRelease(env);
   },
 };

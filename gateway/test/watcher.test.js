@@ -220,6 +220,12 @@ test("selectPendingReleaseVersions - Surfaces unrecognized new tags once and ign
   ];
   assert.deepEqual(selectPendingReleaseVersions(upstreamWithBadTag, releases, failedBadRun), []);
 
+  // Same for manual dispatches whose input started with `v` (producing `Release vv...`)
+  const failedDoubleVRun = [
+    { status: "completed", conclusion: "failure", display_title: "Release vv2.18.0-alpha-1-1" },
+  ];
+  assert.deepEqual(selectPendingReleaseVersions(upstreamWithBadTag, releases, failedDoubleVRun), []);
+
   // Historical malformed tags below baseline are ignored
   assert.deepEqual(
     selectPendingReleaseVersions([{ name: "v2.17.0" }, { name: "v.1.1.2" }], releases, []),
@@ -227,7 +233,35 @@ test("selectPendingReleaseVersions - Surfaces unrecognized new tags once and ign
   );
 });
 
-test("selectPendingReleaseVersions - Brand-new repo dispatches only the single newest candidate", () => {
+test("selectPendingReleaseVersions - Dispatches GA maintenance patches below an RC or newer GA baseline", () => {
+  // Patch 2.17.1 released after 2.18.0-rc1 is already packaged
+  assert.deepEqual(
+    selectPendingReleaseVersions(
+      [{ name: "v2.17.1" }, { name: "v2.18.0-rc1" }, { name: "v2.17.0" }],
+      [
+        { tag_name: "v2.18.0-rc1-1", draft: false },
+        { tag_name: "v2.17.0-1", draft: false },
+      ],
+      []
+    ),
+    ["2.17.1"]
+  );
+
+  // Patch 2.17.1 released after 2.18.0 GA (with 2.17.0 packaged and older untracked 2.16.0 ignored)
+  assert.deepEqual(
+    selectPendingReleaseVersions(
+      [{ name: "v2.17.1" }, { name: "v2.18.0" }, { name: "v2.17.0" }, { name: "v2.16.0" }],
+      [
+        { tag_name: "v2.18.0-1", draft: false },
+        { tag_name: "v2.17.0-1", draft: false },
+      ],
+      []
+    ),
+    ["2.17.1"]
+  );
+});
+
+test("selectPendingReleaseVersions - Brand-new repo dispatches newest GA and newest RC if RC is ahead", () => {
   assert.deepEqual(
     selectPendingReleaseVersions(
       [{ name: "v2.17.0" }, { name: "v2.17.0-rc2" }, { name: "v2.16.0" }],
@@ -235,6 +269,16 @@ test("selectPendingReleaseVersions - Brand-new repo dispatches only the single n
       []
     ),
     ["2.17.0"]
+  );
+
+  // When newest upstream tag is an RC, bootstrap stable with newest GA before the RC
+  assert.deepEqual(
+    selectPendingReleaseVersions(
+      [{ name: "v2.18.0-rc1" }, { name: "v2.17.0" }, { name: "v2.16.0" }],
+      [],
+      []
+    ),
+    ["2.17.0", "2.18.0-rc1"]
   );
 
   // If newest upstream tag in a brand-new repo is malformed, dispatch it once
@@ -265,7 +309,6 @@ function atomFeed(tagNames) {
 async function runScheduled({ env = SCHEDULE_ENV, fetchImpl } = {}) {
   const originalFetch = globalThis.fetch;
   const fetchCalls = [];
-  const pending = [];
 
   globalThis.fetch = async (input, init) => {
     const url = String(input);
@@ -274,14 +317,8 @@ async function runScheduled({ env = SCHEDULE_ENV, fetchImpl } = {}) {
   };
 
   try {
-    const result = await worker.scheduled({ cron: "0 * * * *" }, env, {
-      waitUntil: (promise) => pending.push(promise),
-    });
-    await Promise.all(pending);
+    const result = await worker.scheduled({ cron: "0 * * * *" }, env, {});
     return { result, fetchCalls };
-  } catch (err) {
-    await Promise.allSettled(pending);
-    throw err;
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -323,7 +360,7 @@ test("worker.scheduled - Queries tags.atom (unauthenticated) + GitHub API and qu
       }
       if (
         url ===
-        `https://api.github.com/repos/${TEST_REPO}/actions/workflows/release.yaml/runs?event=workflow_dispatch&per_page=20`
+        `https://api.github.com/repos/${TEST_REPO}/actions/workflows/release.yaml/runs?event=workflow_dispatch&per_page=100`
       ) {
         return Response.json({ workflow_runs: [] });
       }
