@@ -16,3 +16,7 @@ directory = "./dist"
 [triggers]
 # Hourly check for new upstream Apache Kvrocks tags (GA and pre-release) to dispatch release.yaml.
 crons = ["0 * * * *"]
+
+[observability.logs]
+enabled = true
+invocation_logs = true
