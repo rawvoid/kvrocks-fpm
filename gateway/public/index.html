@@ -52,7 +52,7 @@
       }
     };
   </script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.5/dist/cdn.min.js" integrity="sha384-FYLKjwG3aohNhNZoVG8sY/5ntunm+MqylL90Q+rT3OM7AwV9/BKFjk/RjoIpIgsI" crossorigin="anonymous"></script>
   <style>
     [x-cloak] { display: none !important; }
 
@@ -105,72 +105,7 @@
   <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <svg class="w-8 h-8 shrink-0 select-none drop-shadow-sm" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Apache Kvrocks Logo">
-          <defs>
-            <linearGradient id="navKvTop" x1="0%" y1="100%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#22c55e"/>
-              <stop offset="100%" stop-color="#4ade80"/>
-            </linearGradient>
-            <linearGradient id="navKvLeft" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#16a34a"/>
-              <stop offset="100%" stop-color="#15803d"/>
-            </linearGradient>
-            <linearGradient id="navKvRight" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#15803d"/>
-              <stop offset="100%" stop-color="#14532d"/>
-            </linearGradient>
-            <linearGradient id="navKvMTop" x1="0%" y1="100%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#16a34a"/>
-              <stop offset="100%" stop-color="#22c55e"/>
-            </linearGradient>
-            <linearGradient id="navKvMLeft" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#15803d"/>
-              <stop offset="100%" stop-color="#166534"/>
-            </linearGradient>
-            <linearGradient id="navKvMRight" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#14532d"/>
-              <stop offset="100%" stop-color="#052e16"/>
-            </linearGradient>
-            <linearGradient id="navKvBLeft" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#166534"/>
-              <stop offset="100%" stop-color="#14532d"/>
-            </linearGradient>
-            <linearGradient id="navKvBRight" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#14532d"/>
-              <stop offset="100%" stop-color="#022c22"/>
-            </linearGradient>
-            <radialGradient id="navKvGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#4ade80" stop-opacity="0.38"/>
-              <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-          <ellipse cx="18" cy="19" rx="16" ry="13" fill="url(#navKvGlow)"/>
-          <!-- Persistent Base Layer (SSTable) -->
-          <g transform="translate(0, 14)">
-            <path d="M6 7 L18 14 L30 7 L18 0 Z" fill="#15803d" opacity="0.8"/>
-            <path d="M6 7 L18 14 L18 18 L6 11 Z" fill="url(#navKvBLeft)"/>
-            <path d="M18 14 L30 7 L30 11 L18 18 Z" fill="url(#navKvBRight)"/>
-            <path d="M6 11 L18 18 L30 11" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.25"/>
-          </g>
-          <!-- Active Layer 0 (SSTable Level 0) -->
-          <g transform="translate(0, 7)">
-            <path d="M6 7 L18 14 L30 7 L18 0 Z" fill="url(#navKvMTop)"/>
-            <path d="M6 7 L18 14 L18 18 L6 11 Z" fill="url(#navKvMLeft)"/>
-            <path d="M18 14 L30 7 L30 11 L18 18 Z" fill="url(#navKvMRight)"/>
-            <path d="M18 0 L6 7 L18 14 L30 7 Z" stroke="#86efac" stroke-width="0.5" stroke-opacity="0.3"/>
-            <path d="M6 11 L18 18 L30 11" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.35"/>
-          </g>
-          <!-- Floating Memory Core (MemTable / Cache) -->
-          <g>
-            <path d="M6 8 L18 15 L18 19 L6 12 Z" fill="url(#navKvLeft)"/>
-            <path d="M18 15 L30 8 L30 12 L18 19 Z" fill="url(#navKvRight)"/>
-            <path d="M18 1 L30 8 L18 15 L6 8 Z" fill="url(#navKvTop)"/>
-            <path d="M18 1 L6 8 L18 15 L30 8 Z" stroke="#bbf7d0" stroke-width="0.6" stroke-opacity="0.8"/>
-            <path d="M18 15 L18 19" stroke="#86efac" stroke-width="0.6" stroke-opacity="0.7"/>
-            <path d="M6 12 L18 19 L30 12" stroke="#4ade80" stroke-width="0.5" stroke-opacity="0.45"/>
-            <path d="M18 4.5 L24 8 L18 11.5 L12 8 Z" fill="#ffffff" fill-opacity="0.2"/>
-          </g>
-        </svg>
+        <img src="/favicon.svg" alt="Apache Kvrocks Logo" class="w-8 h-8 shrink-0 select-none drop-shadow-sm">
         <div class="flex flex-col">
           <span class="font-bold text-lg leading-tight tracking-tight flex items-center space-x-2">
             <span>Apache Kvrocks</span>
@@ -272,7 +207,7 @@
                 <button @click="os = 'rhel'" 
                         :class="os === 'rhel' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 font-bold shadow-sm' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-medium'" 
                         class="h-8 text-xs rounded-lg transition whitespace-nowrap flex items-center justify-center">
-                  RHEL / Rocky
+                  Fedora / EL 10+
                 </button>
               </div>
             </div>
@@ -319,6 +254,8 @@
               </div>
             </div>
           </div>
+
+          <p class="mt-4 text-xs text-slate-500 dark:text-slate-400">Requires Linux with <code class="font-mono text-slate-700 dark:text-slate-300">glibc &gt;= 2.35</code> (Ubuntu 22.04+, Debian 12+, Fedora 36+, EL 10+).</p>
         </div>
 
         <!-- Code Snippets Display -->
@@ -342,10 +279,10 @@
             </p>
             <div class="relative group">
               <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getQuickInstallCmd()"></code></pre>
-              <button @click="copy(getQuickInstallCmd())" 
+              <button @click="copyText(getQuickInstallCmd(), 'quick')" 
                       class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1"
                       title="Copy command">
-                <span x-text="copied ? '✓ Copied' : 'Copy'"></span>
+                <span x-text="copiedId === 'quick' ? '✓ Copied' : 'Copy'"></span>
               </button>
             </div>
           </div>
@@ -358,10 +295,10 @@
 
             <div class="relative group">
               <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs sm:text-sm font-mono overflow-x-auto border border-slate-800 shadow-inner"><code x-text="getManualInstallCmd()"></code></pre>
-              <button @click="copy(getManualInstallCmd())" 
+              <button @click="copyText(getManualInstallCmd(), 'manual')" 
                       class="absolute top-3 right-3 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 border border-slate-700 transition flex items-center space-x-1"
                       title="Copy command">
-                <span x-text="copied ? '✓ Copied' : 'Copy'"></span>
+                <span x-text="copiedId === 'manual' ? '✓ Copied' : 'Copy'"></span>
               </button>
             </div>
           </div>
@@ -443,8 +380,10 @@
             <!-- Release Header (Click to toggle expand/collapse) -->
             <div @click="toggleRelease(rel.id)" 
                  @keydown.enter.prevent="toggleRelease(rel.id)"
+                 @keydown.space.prevent="toggleRelease(rel.id)"
                  role="button"
                  tabindex="0"
+                 :aria-expanded="isExpanded(rel.id)"
                  class="px-5 py-4 sm:px-6 bg-slate-50/60 dark:bg-slate-900/60 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-100/60 dark:hover:bg-slate-800/60 transition group focus:outline-none focus:ring-2 focus:ring-brand-500/50">
               <!-- Left: Chevron + Version Title + Channel Badge -->
               <div class="flex items-center space-x-2.5 sm:space-x-3">
@@ -488,7 +427,7 @@
 
             <!-- Assets List (Clean Two-Line / Row Card Layout, Collapsible) -->
             <div x-show="isExpanded(rel.id)" class="divide-y divide-slate-100 dark:divide-slate-800">
-              <template x-for="asset in getFilteredAssets(rel.assets)" :key="asset.id">
+              <template x-for="asset in getFilteredAssets(rel.assets, releaseMatchesQuery(rel))" :key="asset.id">
                 <div class="px-5 py-2.5 sm:px-6 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition text-xs group">
                   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                     <!-- Line 1 / Left: Format Pill + Arch Badge + Clickable File Name + Copy Link button -->
@@ -658,7 +597,6 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         arch: 'v3',
         channel: 'stable',
         installTab: 'quick',
-        copied: false,
         copiedId: null,
         repoOrigin: /^https?:\/\//.test('__REPO_ORIGIN__') ? '__REPO_ORIGIN__' : window.location.origin,
         releases: [],
@@ -738,10 +676,11 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
 
         getQuickInstallCmd() {
           const scriptUrl = `${this.repoOrigin}/install.sh`;
-          if (this.channel === 'testing') {
-            return `curl -fsSL ${scriptUrl} | sudo KVROCKS_CHANNEL=testing bash`;
-          }
-          return `curl -fsSL ${scriptUrl} | sudo bash`;
+          const envVars = [];
+          if (this.channel === 'testing') envVars.push('KVROCKS_CHANNEL=testing');
+          if (this.arch === 'legacy') envVars.push('KVROCKS_FLAVOR=legacy');
+          const prefix = envVars.length > 0 ? envVars.join(' ') + ' ' : '';
+          return `curl -fsSL ${scriptUrl} | sudo ${prefix}bash`;
         },
 
         getManualInstallCmd() {
@@ -758,9 +697,10 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
             const channels = this.channel === 'testing' ? ['stable', 'testing'] : ['stable'];
 
             return [
-              '# 1. Install prerequisites & import GPG key',
+              '# 1. Import repository GPG key',
               `sudo install -m 0755 -d ${keyringDir}`,
               `curl -fsSL ${origin}/kvrocks.gpg | sudo tee ${keyring} > /dev/null`,
+              `sudo chmod 0644 ${keyring}`,
               '',
               '# 2. Add repository source',
               ...channels.map((channel, i) =>
@@ -772,22 +712,24 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
             ].join('\n');
           }
 
-          const extraRepo = this.channel === 'testing' ? '--enablerepo=kvrocks-testing ' : '';
-          return [
+          const lines = [
             '# 1. Download repository config & import key',
             `sudo curl -fsSL ${origin}/kvrocks.repo -o /etc/yum.repos.d/kvrocks.repo`,
             `sudo rpm --import ${origin}/kvrocks.asc`,
+          ];
+          if (this.channel === 'testing') {
+            lines.push(
+              '',
+              '# 2. Enable testing channel persistently',
+              `sudo sed -i '/^\\[kvrocks-testing\\]/,/^\\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/kvrocks.repo`
+            );
+          }
+          lines.push(
             '',
-            '# 2. Install package via DNF',
-            `sudo dnf install -y ${extraRepo}${pkg}`,
-          ].join('\n');
-        },
-
-        copy(text) {
-          navigator.clipboard.writeText(text).then(() => {
-            this.copied = true;
-            setTimeout(() => { this.copied = false; }, 2000);
-          });
+            `# ${this.channel === 'testing' ? '3' : '2'}. Install package via DNF`,
+            `sudo dnf install -y ${pkg}`
+          );
+          return lines.join('\n');
         },
 
         copyText(text, id) {
@@ -799,7 +741,7 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
                 this.copiedId = null;
               }
             }, 2000);
-          });
+          }).catch(() => {});
         },
 
         getSha256(asset) {
@@ -876,18 +818,17 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
           }
         },
 
-        get filteredReleases() {
-          let rels = this.releases;
-          if (this.pkgType !== 'all') {
-            rels = rels.filter(r => this.getFilteredAssets(r.assets).length > 0);
-          }
-          if (!this.searchQuery) return rels;
+        releaseMatchesQuery(rel) {
+          if (!this.searchQuery) return false;
           const q = this.searchQuery.toLowerCase();
-          return rels.filter(r => {
-            const matchName = (r.name || '').toLowerCase().includes(q) || (r.tag_name || '').toLowerCase().includes(q);
-            const matchAsset = this.getFilteredAssets(r.assets).length > 0;
-            return matchName || matchAsset;
-          });
+          return (rel.name || '').toLowerCase().includes(q) || (rel.tag_name || '').toLowerCase().includes(q);
+        },
+
+        get filteredReleases() {
+          if (this.pkgType === 'all' && !this.searchQuery) return this.releases;
+          return this.releases.filter(
+            r => this.getFilteredAssets(r.assets, this.releaseMatchesQuery(r)).length > 0
+          );
         },
 
         getAssetPriority(name) {
@@ -921,9 +862,11 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
           return null;
         },
 
-        getFilteredAssets(assets) {
+        getFilteredAssets(assets, includeAllOnTitleMatch = false) {
           if (!assets) return [];
-          let filtered = assets.filter(a => !a.name.endsWith('.txt') && a.name !== 'SHA256SUMS');
+          let filtered = assets.filter(
+            a => !a.name.endsWith('.txt') && a.name !== 'SHA256SUMS' && a.name !== 'SHA256SUMS.asc'
+          );
           if (this.pkgType === 'deb') {
             filtered = filtered.filter(a => a.name.endsWith('.deb'));
           } else if (this.pkgType === 'rpm') {
@@ -933,7 +876,10 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
           }
           if (this.searchQuery) {
             const q = this.searchQuery.toLowerCase();
-            filtered = filtered.filter(a => a.name.toLowerCase().includes(q));
+            const assetMatches = filtered.filter(a => a.name.toLowerCase().includes(q));
+            if (assetMatches.length > 0 || !includeAllOnTitleMatch) {
+              filtered = assetMatches;
+            }
           }
           return filtered.sort((a, b) => {
             const prioDiff = this.getAssetPriority(a.name) - this.getAssetPriority(b.name);
