@@ -1,4 +1,5 @@
 name: Release Packages
+# `gateway/src/watcher.js` parses this exact title format (`Release v<version>-<iteration>` and ` (dry-run)`).
 run-name: Release v${{ inputs.version }}-${{ inputs.iteration }}${{ inputs.dry_run && ' (dry-run)' || '' }}
 
 permissions:
@@ -8,8 +9,9 @@ permissions:
 # `cancel-in-progress: false` only protects the run already executing — by default GitHub keeps a single
 # pending run and silently cancels the ones behind it, which loses releases. A queued run for an
 # already-published version fails fast in preflight, so keeping the whole queue is cheap.
+# Dry runs use a per-run group so test builds never block or queue behind real releases.
 concurrency:
-  group: release-pipeline
+  group: ${{ inputs.dry_run && format('release-dry-run-{0}', github.run_id) || 'release-pipeline' }}
   cancel-in-progress: false
   queue: max
 
@@ -175,7 +177,7 @@ jobs:
       RPM_ARCH: ${{ matrix.rpm_arch }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_MAXSIZE: 4G
+      CCACHE_MAXSIZE: 2G
     strategy:
       fail-fast: true
       matrix:
@@ -188,6 +190,7 @@ jobs:
             extra_flags: "-march=x86-64-v3 -mpclmul -O3"
             cmake_extra_flags: ""
             pkg_suffix: ""
+            pkg_description: "Apache Kvrocks NoSQL database (Redis protocol, RocksDB, x86-64-v3 AVX2)"
             deb_extra_args: "--conflicts kvrocks-legacy --replaces kvrocks-legacy"
             # RPM uses --conflicts without --obsoletes so dnf update never auto-replaces legacy on non-AVX2 hosts
             rpm_extra_args: "--conflicts kvrocks-legacy"
@@ -209,6 +212,7 @@ jobs:
             extra_flags: "-march=x86-64 -mtune=generic -mno-avx -mno-avx2 -mno-bmi -mno-bmi2 -DDYNAMIC_BMI2=0 -DZSTD_DISABLE_ASM=1 -O3"
             cmake_extra_flags: "-DWITH_AVX2=OFF -DWITH_AVX512=OFF"
             pkg_suffix: "-legacy"
+            pkg_description: "Apache Kvrocks NoSQL database (Redis protocol, RocksDB, legacy x86-64-v1)"
             deb_extra_args: "--conflicts kvrocks --replaces kvrocks"
             rpm_extra_args: "--conflicts kvrocks"
 
@@ -220,6 +224,7 @@ jobs:
             extra_flags: "-march=armv8-a -mtune=generic -O3"
             cmake_extra_flags: ""
             pkg_suffix: ""
+            pkg_description: "Apache Kvrocks NoSQL database (Redis protocol, RocksDB, ARM64)"
             deb_extra_args: ""
             rpm_extra_args: ""
 
@@ -245,6 +250,7 @@ jobs:
             ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-
 
       - name: Build Kvrocks
+        id: build
         env:
           # -g emits DWARF symbols that are split into the debuginfo archive afterwards
           CFLAGS: -g -ffile-prefix-map=${{ github.workspace }}/kvrocks=/usr/src/debug/kvrocks ${{ matrix.extra_flags }} -Wno-deprecated-declarations
@@ -393,6 +399,7 @@ jobs:
         env:
           DEB_EXTRA_ARGS: ${{ matrix.deb_extra_args }}
           RPM_EXTRA_ARGS: ${{ matrix.rpm_extra_args }}
+          PKG_DESCRIPTION: ${{ matrix.pkg_description }}
           # Package metadata names the account running the pipeline, so a fork attributes its own builds
           # to itself. Both are overridable with repository variables.
           PACKAGE_VENDOR: ${{ vars.KVROCKS_PACKAGE_VENDOR || github.repository_owner }}
@@ -425,7 +432,7 @@ jobs:
             --category database
             --vendor "${PACKAGE_VENDOR}"
             --maintainer "${PACKAGE_MAINTAINER}"
-            --description 'A distributed key value NoSQL database that uses RocksDB as storage engine and is compatible with Redis protocol'
+            --description "$PKG_DESCRIPTION"
             --url 'https://kvrocks.apache.org'
             --license 'Apache-2.0'
             --config-files /etc/kvrocks/kvrocks.conf
@@ -520,7 +527,7 @@ jobs:
 
       - name: Save ccache
         uses: actions/cache/save@v6
-        if: always()
+        if: steps.build.outcome == 'success'
         with:
           path: .ccache
           key: ccache-${{ matrix.arch }}-${{ matrix.cpu_target }}-${{ env.VERSION }}-${{ env.ITERATION }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -531,12 +538,6 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    # Serialize gh-pages writes. `queue: max` keeps a pending publish from being dropped when a second
-    # release enters the group while this one runs.
-    concurrency:
-      group: pages-repository-deployment
-      cancel-in-progress: false
-      queue: max
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
@@ -789,7 +790,6 @@ jobs:
         if: ${{ !inputs.dry_run }}
         working-directory: pages
         run: |
-          git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1 && git pull --rebase origin gh-pages
           git push origin gh-pages
 
       - name: Summary
