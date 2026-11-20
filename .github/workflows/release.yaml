@@ -416,6 +416,7 @@ jobs:
           sudo chown kvrocks:kvrocks rootfs/etc/kvrocks/kvrocks.conf rootfs/var/lib/kvrocks rootfs/var/log/kvrocks
           sudo chmod 0640 rootfs/etc/kvrocks/kvrocks.conf
           sudo chmod 0750 rootfs/var/lib/kvrocks rootfs/var/log/kvrocks
+          sudo chmod 0755 rootfs/usr/share/doc/kvrocks rootfs/usr/share/doc/kvrocks/licenses
           sudo chmod 0755 rootfs/usr/bin/kvrocks rootfs/usr/bin/kvrocks2redis
 
           common=(
@@ -453,6 +454,8 @@ jobs:
             --rpm-tag 'Requires(pre): shadow-utils' \
             --rpm-use-file-permissions \
             --rpm-digest sha256 \
+            --directories /etc/kvrocks \
+            --directories /usr/share/doc/kvrocks \
             --rpm-posttrans packaging/hooks/rpm-posttrans.sh \
             "${rpm_extra[@]}" \
             -p "dist/${PKG_NAME}-${VERSION}-${ITERATION}.${RPM_ARCH}.rpm"
@@ -483,6 +486,17 @@ jobs:
             || { echo "::error::${PKG_NAME} RPM: /etc/kvrocks/kvrocks.conf not marked %config"; exit 1; }
           dpkg-deb --field "$deb" Depends | grep -Fq init-system-helpers \
             || { echo "::error::${PKG_NAME} DEB: missing Depends init-system-helpers"; exit 1; }
+
+          rpm_files=$(rpm -qp --qf '[%{FILENAMES} %{FILEUSERNAME}:%{FILEGROUPNAME} %{FILEMODES:perms}\n]' "$rpm")
+          for expected_entry in \
+            "/etc/kvrocks root:kvrocks drwxrwxr-x" \
+            "/etc/kvrocks/kvrocks.conf kvrocks:kvrocks -rw-r-----" \
+            "/var/lib/kvrocks kvrocks:kvrocks drwxr-x---" \
+            "/var/log/kvrocks kvrocks:kvrocks drwxr-x---" \
+            "/usr/share/doc/kvrocks root:root drwxr-xr-x"; do
+            grep -Fxq "$expected_entry" <<<"$rpm_files" \
+              || { echo "::error::${PKG_NAME} RPM: missing or mismatched entry '${expected_entry}'"; echo "$rpm_files"; exit 1; }
+          done
 
           # x86-64 ships two mutually exclusive flavors that share every path, so each must
           # conflict with the other; arm64 ships a single flavor and declares no conflicts.
