@@ -1,15 +1,15 @@
 [kvrocks]
 name=Apache Kvrocks Repository
-baseurl=@GATEWAY_URL@/rpm/stable/$basearch/
+baseurl=__REPO_ORIGIN__/rpm/stable/$basearch/
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1
-gpgkey=@GATEWAY_URL@/kvrocks.asc
+gpgkey=__REPO_ORIGIN__/kvrocks.asc
 
 [kvrocks-testing]
 name=Apache Kvrocks Testing Repository
-baseurl=@GATEWAY_URL@/rpm/testing/$basearch/
+baseurl=__REPO_ORIGIN__/rpm/testing/$basearch/
 enabled=0
 gpgcheck=1
 repo_gpgcheck=1
-gpgkey=@GATEWAY_URL@/kvrocks.asc
+gpgkey=__REPO_ORIGIN__/kvrocks.asc

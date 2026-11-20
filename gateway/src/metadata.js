@@ -1,5 +1,5 @@
 /**
- * Repository metadata proxy: forwards APT/DNF indexes, signing keys, and repo config from
+ * Repository metadata proxy: forwards APT/DNF indexes and signing keys from
  * GitHub Pages with per-type TTLs and conditional request (304) handling.
  */
 

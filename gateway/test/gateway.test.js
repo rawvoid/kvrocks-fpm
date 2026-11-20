@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import worker from "../src/index.js";
 import { resolveMetadataOrigin } from "../src/metadata.js";
 import { resolveReleaseDownloadUrl } from "../src/packages.js";
+import { render } from "../scripts/render.mjs";
 
 // Test-only generic fixtures to ensure decoupling from production configuration
 const TEST_REPO = "test-owner/test-repo";
@@ -423,8 +428,8 @@ test("worker.fetch - Metadata target always stays on the configured origin", asy
   assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}//evil.example.net/x`);
 
   const prefixed = { ...TEST_ENV, METADATA_ORIGIN: "https://pages.example.com/project/" };
-  const { fetchCalls: prefixedCalls } = await call("/kvrocks.repo", { env: prefixed });
-  assert.equal(prefixedCalls[0].url, "https://pages.example.com/project/kvrocks.repo");
+  const { fetchCalls: prefixedCalls } = await call("/kvrocks.asc", { env: prefixed });
+  assert.equal(prefixedCalls[0].url, "https://pages.example.com/project/kvrocks.asc");
 });
 
 test("worker.fetch - Metadata Cache-Control policy per resource type", async () => {
@@ -449,7 +454,6 @@ test("worker.fetch - Metadata Cache-Control policy per resource type", async () 
     "public, max-age=86400, s-maxage=86400": ["/kvrocks.asc", "/kvrocks.gpg"],
     "public, max-age=600, s-maxage=600": [
       "/",
-      "/kvrocks.repo",
       "/rpm/stable/x86_64/repodata/comps.xml",
       "/rpm/stable/x86_64/repodata/productid.xml.gz",
     ],
@@ -497,14 +501,14 @@ test("worker.fetch - Metadata upstream network failure returns a plain-text 502,
 });
 
 test("worker.fetch - Metadata drops set-cookie and HEAD returns no body", async () => {
-  const get = await call("/kvrocks.repo", {
+  const get = await call("/kvrocks.asc", {
     upstream: () => new Response("echo", { headers: { "Set-Cookie": "a=b", "Content-Type": "text/plain" } }),
   });
   assert.equal(get.res.headers.has("set-cookie"), false);
   assert.equal(get.res.headers.get("content-type"), "text/plain");
   assert.equal(await get.res.text(), "echo");
 
-  const head = await call("/kvrocks.repo", { method: "HEAD", upstream: () => new Response("echo") });
+  const head = await call("/kvrocks.asc", { method: "HEAD", upstream: () => new Response("echo") });
   assert.equal(head.res.status, 200);
   assert.equal(head.res.body, null);
 });
@@ -563,11 +567,91 @@ test("worker.fetch - Conditional headers never turn errors into 304", async () =
   assert.equal(res.status, 404);
 });
 
-// --- Installer --------------------------------------------------------------
+// --- Static Assets ----------------------------------------------------------
 
-test("worker.fetch - /install.sh is a static asset, never the Worker's business", async () => {
-  // The asset layer answers this path before the Worker runs; if a request ever reached here the
-  // installer would be proxied to the metadata origin instead of the deployed copy.
-  const { fetchCalls } = await call("/install.sh");
-  assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}/install.sh`);
+test("worker.fetch - Static assets (/install.sh, /kvrocks.repo) are served by the asset layer, never the Worker's business", async () => {
+  // The asset layer answers these paths before the Worker runs; if a request ever reached here it
+  // would be proxied to the metadata origin instead of the deployed copy.
+  for (const path of ["/install.sh", "/kvrocks.repo"]) {
+    const { fetchCalls } = await call(path);
+    assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}${path}`);
+  }
+});
+
+// --- Asset Rendering --------------------------------------------------------
+
+/** Runs `render()` with temporary env overrides while preserving existing `dist/` and `.dev.vars`. */
+function withRenderEnv(overrides, fn) {
+  const gatewayDir = dirname(dirname(fileURLToPath(import.meta.url)));
+  const distDir = join(gatewayDir, "dist");
+  const devVarsPath = join(gatewayDir, ".dev.vars");
+  const backupDir = mkdtempSync(join(tmpdir(), "kvrocks-render-backup-"));
+  const hadDist = existsSync(distDir);
+  const hadDevVars = existsSync(devVarsPath);
+
+  if (hadDist) cpSync(distDir, join(backupDir, "dist"), { recursive: true });
+  if (hadDevVars) cpSync(devVarsPath, join(backupDir, ".dev.vars"));
+
+  const prevEnv = new Map();
+  for (const [key, value] of Object.entries(overrides)) {
+    prevEnv.set(key, process.env[key]);
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+
+  try {
+    return fn(distDir);
+  } finally {
+    for (const [key, value] of prevEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    rmSync(distDir, { recursive: true, force: true });
+    rmSync(devVarsPath, { force: true });
+    if (hadDist) cpSync(join(backupDir, "dist"), distDir, { recursive: true });
+    if (hadDevVars) cpSync(join(backupDir, ".dev.vars"), devVarsPath);
+    rmSync(backupDir, { recursive: true, force: true });
+  }
+}
+
+test("render - Substitutes __GITHUB_REPO__ and __REPO_ORIGIN__ across index.html, install.sh and kvrocks.repo", () => {
+  withRenderEnv(
+    { GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: "https://repo.example.com/" },
+    (distDir) => {
+      const result = render();
+      assert.deepEqual(result, { slug: TEST_REPO, origin: "https://repo.example.com" });
+
+      const html = readFileSync(join(distDir, "index.html"), "utf8");
+      const installer = readFileSync(join(distDir, "install.sh"), "utf8");
+      const repoConfig = readFileSync(join(distDir, "kvrocks.repo"), "utf8");
+
+      for (const content of [html, installer, repoConfig]) {
+        assert.equal(content.includes("__GITHUB_REPO__"), false);
+        assert.equal(content.includes("__REPO_ORIGIN__"), false);
+      }
+
+      assert.equal(html.includes(`https://github.com/${TEST_REPO}`), true);
+      assert.equal(html.includes("https://repo.example.com"), true);
+      assert.equal(installer.includes('REPO_ORIGIN="https://repo.example.com"'), true);
+      assert.equal(repoConfig.includes("baseurl=https://repo.example.com/rpm/stable/$basearch/"), true);
+      assert.equal(repoConfig.includes("baseurl=https://repo.example.com/rpm/testing/$basearch/"), true);
+      assert.equal(repoConfig.includes("gpgkey=https://repo.example.com/kvrocks.asc"), true);
+    }
+  );
+});
+
+test("render - Leaves __REPO_ORIGIN__ unrendered when KVROCKS_GATEWAY_URL is unset", () => {
+  withRenderEnv({ GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: undefined }, (distDir) => {
+    const result = render();
+    assert.deepEqual(result, { slug: TEST_REPO, origin: null });
+
+    const html = readFileSync(join(distDir, "index.html"), "utf8");
+    const installer = readFileSync(join(distDir, "install.sh"), "utf8");
+    const repoConfig = readFileSync(join(distDir, "kvrocks.repo"), "utf8");
+
+    assert.equal(html.includes("__GITHUB_REPO__"), false);
+    assert.equal(html.includes("__REPO_ORIGIN__"), true);
+    assert.equal(installer.includes('REPO_ORIGIN="__REPO_ORIGIN__"'), true);
+    assert.equal(repoConfig.includes("baseurl=__REPO_ORIGIN__/rpm/stable/$basearch/"), true);
+  });
 });

@@ -5,11 +5,11 @@
  * Rendering resolves the two placeholders in the sources, so a fork edits no file at all:
  *   __GITHUB_REPO__   `owner/repo` of this repository — read from `GITHUB_REPOSITORY` (exported by
  *                     GitHub Actions for every step), else from the `origin` remote for local runs.
- *   __REPO_ORIGIN__   public origin of the deployed gateway — read from `KVROCKS_GATEWAY_URL`, the
- *                     same repository variable the release pipeline uses for `kvrocks.repo`.
+ *   __REPO_ORIGIN__   public origin of the deployed gateway — read from `KVROCKS_GATEWAY_URL` and
+ *                     baked into `index.html`, `install.sh` and `kvrocks.repo`.
  *
- * An unset `KVROCKS_GATEWAY_URL` is left as the bare placeholder: the landing page still works, and the
- * installer refuses to guess and asks for `KVROCKS_REPO_URL` instead.
+ * An unset `KVROCKS_GATEWAY_URL` is left as the bare placeholder: the landing page falls back to
+ * `window.location.origin`, and the installer refuses to guess and asks for `KVROCKS_REPO_URL` instead.
  */
 
 import { execFileSync } from "node:child_process";
@@ -59,7 +59,7 @@ function resolveSlug() {
   process.exit(1);
 }
 
-/** Returns the gateway origin to bake into the installer, or null when it is not configured. */
+/** Returns the gateway origin to bake into the static assets, or null when it is not configured. */
 function resolveOrigin() {
   const origin = process.env.KVROCKS_GATEWAY_URL?.trim().replace(/\/+$/, "");
   if (!origin) return null;
@@ -110,7 +110,7 @@ export function render() {
   }
 
   const renderedPage = substitute(GITHUB_REPO_PLACEHOLDER, slug);
-  const renderedInstaller = origin ? substitute(REPO_ORIGIN_PLACEHOLDER, origin) : [];
+  const renderedOrigin = origin ? substitute(REPO_ORIGIN_PLACEHOLDER, origin) : [];
 
   // `wrangler dev` reads local-only variables from `.dev.vars`; `wrangler deploy` does not, which is why
   // `scripts/deploy.mjs` passes the same value with `--var`.
@@ -119,12 +119,12 @@ export function render() {
   console.log(`render: repository ${slug}`);
   console.log(`render: origin ${origin ?? "(KVROCKS_GATEWAY_URL unset)"}`);
   for (const rel of renderedPage) console.log(`render: ${rel} <- ${GITHUB_REPO_PLACEHOLDER}`);
-  for (const rel of renderedInstaller) console.log(`render: ${rel} <- ${REPO_ORIGIN_PLACEHOLDER}`);
+  for (const rel of renderedOrigin) console.log(`render: ${rel} <- ${REPO_ORIGIN_PLACEHOLDER}`);
 
   if (!origin) {
     console.warn(
-      "render: KVROCKS_GATEWAY_URL is not set, so install.sh keeps the bare placeholder and will ask for " +
-        "KVROCKS_REPO_URL instead of installing."
+      "render: KVROCKS_GATEWAY_URL is not set, so __REPO_ORIGIN__ stays unrendered (index.html falls back " +
+        "to window.location.origin; install.sh will ask for KVROCKS_REPO_URL)."
     );
   }
 

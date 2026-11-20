@@ -1,8 +1,9 @@
 name: Gateway
 
-# Deploys the edge gateway Worker together with the landing page and the installer it serves as static
-# assets (gateway/public/). Repository metadata is not built here: the release workflow pushes it to
-# gh-pages and the Worker proxies it, so a deploy cannot shift package indexes out from under clients.
+# Deploys the edge gateway Worker together with the landing page, installer and DNF repo config it
+# serves as static assets (gateway/public/). Repository metadata is not built here: the release
+# workflow pushes it to gh-pages and the Worker proxies it, so a deploy cannot shift package indexes
+# out from under clients.
 concurrency:
   group: cloudflare-gateway-deployment
   cancel-in-progress: false

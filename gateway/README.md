@@ -1,7 +1,7 @@
 # Apache Kvrocks Package Repository Edge Gateway
 
 Cloudflare Worker that serves the Apache Kvrocks APT (`deb`) and RPM (`rpm`) repositories — metadata,
-packages, landing page and installer — from one origin with global edge caching.
+packages, landing page, installer and DNF repo config — from one origin with global edge caching.
 
 Nothing in this directory names the GitHub account it is deployed under: the repository slug is
 supplied at build and deploy time, so a fork works without editing a single file.
@@ -23,10 +23,11 @@ gateway/
 ├── scripts/render.mjs   # public/ -> dist/, resolving both placeholders
 ├── scripts/deploy.mjs   # render + wrangler deploy, passing the slug as --var
 ├── public/              # asset *sources*, committed
-│   ├── index.html       # landing page, carries __GITHUB_REPO__
+│   ├── index.html       # landing page, carries __GITHUB_REPO__ and __REPO_ORIGIN__
 │   ├── install.sh       # installer, carries __REPO_ORIGIN__
+│   ├── kvrocks.repo     # DNF repo config, carries __REPO_ORIGIN__
 │   ├── favicon.svg      # tab icon, referenced as /favicon.svg
-│   └── _headers         # per-asset caching rules, consumed by the edge
+│   └── _headers         # per-asset headers & caching rules, consumed by the edge
 ├── dist/                # rendered assets, uploaded with the Worker (generated)
 └── .dev.vars            # local GITHUB_REPO for `wrangler dev` (generated)
 ```
@@ -37,7 +38,7 @@ rewrites a file:
 | Placeholder | Comes from | Meaning |
 |---|---|---|
 | `__GITHUB_REPO__` | `GITHUB_REPOSITORY`, else the `origin` remote | `owner/repo` used by the page's links and release list |
-| `__REPO_ORIGIN__` | `KVROCKS_GATEWAY_URL` | Public origin the installer writes into APT/DNF sources |
+| `__REPO_ORIGIN__` | `KVROCKS_GATEWAY_URL` | Public origin baked into `index.html`, `install.sh` and `kvrocks.repo` |
 
 Request routing follows Workers static-asset semantics: **a rendered asset is served by the edge
 without invoking the Worker**, everything else reaches `src/index.js`.
@@ -47,24 +48,25 @@ without invoking the Worker**, everything else reaches `src/index.js`.
 | `/` | static asset | Cached at the edge, revalidated by `ETag` |
 | `/index.html` | static asset layer | `307` redirect to `/` (`html_handling` default `auto-trailing-slash`) |
 | `/install.sh` | static asset | The whole script is fixed at build time; no Worker code runs |
+| `/kvrocks.repo` | static asset | DNF repo config fixed at build time; `_headers` sets `text/plain` |
 | `/favicon.svg` | static asset | `_headers` gives it `max-age=86400`; the page itself stays revalidated by `ETag` |
 | `/pool/*.deb`, `/rpm/**/*.rpm` | Worker | Streamed from GitHub Releases, cached one year per asset |
-| everything else (`/dists/**`, `kvrocks.{repo,gpg,asc}`) | Worker | Proxied from the metadata origin (GitHub Pages) with per-type TTLs |
+| everything else (`/dists/**`, `/rpm/**/repodata/**`, `kvrocks.{gpg,asc}`) | Worker | Proxied from the metadata origin (GitHub Pages) with per-type TTLs |
 
 1. **Metadata stays on GitHub Pages, bytes live on GitHub Releases**
-   - The release workflow merges APT/RPM indexes and pushes only metadata to the `gh-pages` branch
-     (`< 100 KB`: `InRelease`, `Packages.gz`, `repomd.xml`, `kvrocks.repo`, keys).
+   - The release workflow merges APT/RPM indexes and pushes only domain-independent metadata to the
+     `gh-pages` branch (`< 100 KB`: `InRelease`, `Packages.gz`, `repomd.xml`, keys).
    - Package filenames encode the release tag, so the Worker derives the GitHub Release asset URL
      without calling the GitHub API. Full responses are cached in `caches.default` for one year.
 
 2. **One public origin**
-   - The landing page, the installer and the tab icon are static assets of the same Worker, so opening
-     the page and starting an install stay on one origin. (The release list rendered on the page still
-     calls `api.github.com` directly.)
+   - The landing page, the installer, the DNF repo config and the tab icon are static assets of the
+     same Worker, so opening the page and starting an install stay on one origin. (The release list
+     rendered on the page still calls `api.github.com` directly.)
    - No asset is touched at runtime: whatever the build rendered is what the edge serves.
    - The icon is a real file rather than an inline `data:` URI, so browsers cache it once instead of
-     re-downloading it inside every page load. `_headers` keeps it cached for a day while the page and
-     the installer stay revalidated, because those must reflect a deploy immediately.
+     re-downloading it inside every page load. `_headers` keeps it cached for a day while the page,
+     the installer and `kvrocks.repo` stay revalidated, because those must reflect a deploy immediately.
 
 3. **Global edge delivery**
    - The Worker runs on Cloudflare's anycast network and streams packages to the client as `200 OK` over
@@ -121,8 +123,9 @@ npm test                                                     # unit tests
 Neither command needs `--var`: `scripts/deploy.mjs` renders first and hands the resolved slug to
 wrangler, because `wrangler deploy` — unlike `wrangler dev` — does not read `.dev.vars`.
 
-Without `KVROCKS_GATEWAY_URL` the page still builds; the installer keeps its placeholder and refuses
-to run until it is given `KVROCKS_REPO_URL`.
+Without `KVROCKS_GATEWAY_URL` the page still builds (falling back to `window.location.origin`); the
+installer and `kvrocks.repo` keep their placeholder, and the installer refuses to run until it is
+given `KVROCKS_REPO_URL`.
 
 `npm run deploy -- --dry-run` validates the configuration and lists the uploaded assets without
 touching the account.
@@ -131,7 +134,7 @@ touching the account.
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `KVROCKS_GATEWAY_URL` | yes | Public origin of this Worker: baked into `install.sh` and `kvrocks.repo` |
+| `KVROCKS_GATEWAY_URL` | yes | Public origin of this Worker: baked into `index.html`, `install.sh` and `kvrocks.repo` |
 | `KVROCKS_PACKAGE_VENDOR` | no | `--vendor` for the packages; defaults to the repository owner |
 | `KVROCKS_PACKAGE_MAINTAINER` | no | `--maintainer`; defaults to `<owner> <<owner>@users.noreply.github.com>` |
 

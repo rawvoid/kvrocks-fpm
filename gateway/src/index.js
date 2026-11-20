@@ -2,8 +2,8 @@
  * Apache Kvrocks package repository edge gateway (Cloudflare Worker).
  *
  * - Packages (/pool/*.deb, /rpm/**.rpm) are streamed from GitHub Releases and cached in caches.default.
- * - Landing page and installer are plain Static Assets served directly by the edge before this Worker.
- * - Repository metadata (APT/DNF indexes, keys, repo config) is proxied from GitHub Pages.
+ * - Landing page, installer and DNF repo config are plain Static Assets served directly by the edge before this Worker.
+ * - Repository metadata (APT/DNF indexes and signing keys) is proxied from GitHub Pages.
  * - Hourly Cron Trigger (`scheduled`) watches upstream Apache Kvrocks tags and dispatches release.yaml.
  */
 

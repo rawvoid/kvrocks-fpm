@@ -130,17 +130,10 @@ jobs:
       - name: Check Publishing Preconditions
         if: ${{ !inputs.dry_run }}
         env:
-          GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
-          : "${GATEWAY_URL:?Repository variable KVROCKS_GATEWAY_URL must be set}"
           : "${GPG_PRIVATE_KEY:?Secret GPG_PRIVATE_KEY must be set}"
-
-          if [[ ! "$GATEWAY_URL" =~ ^https://[a-zA-Z0-9]+([.-][a-zA-Z0-9]+)*(:[0-9]+)?$ ]]; then
-            echo "::error::KVROCKS_GATEWAY_URL must be a valid HTTPS origin without path or trailing slash (e.g. 'https://repo.example.com')"
-            exit 1
-          fi
 
           # Fail-fast: Verify GPG key can be imported and used for signing
           GNUPGHOME="$(mktemp -d)"
@@ -534,7 +527,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.preflight.outputs.release_tag }}
       CHANNEL: ${{ needs.preflight.outputs.channel }}
-      GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v7
@@ -712,24 +704,20 @@ jobs:
             gpg --verify "${repo_dir}/repodata/repomd.xml.asc" "${repo_dir}/repodata/repomd.xml"
           done
 
-      - name: Publish Signing Key & Repository Config
+      - name: Publish Signing Keys
         if: ${{ !inputs.dry_run }}
         run: |
           gpg --yes --export "$GPG_KEY_ID" > pages/kvrocks.gpg
           gpg --yes --armor --export "$GPG_KEY_ID" > pages/kvrocks.asc
-          sed "s|@GATEWAY_URL@|${GATEWAY_URL%/}|g" packaging/kvrocks.repo.in > pages/kvrocks.repo
           touch pages/.nojekyll
 
       # The branch holds repository metadata only: binaries live on GitHub Releases (streamed by the
-      # gateway) and the landing page & installer are static assets of the gateway Worker, deployed by
-      # .github/workflows/gateway.yaml. Drop any copy left behind by the old pages sync, then hold the
-      # branch to the whitelist so the split cannot silently erode.
-      - name: Drop Assets Now Served by the Worker
-        run: rm -f pages/index.html pages/install.sh
-
+      # gateway) and the landing page, installer & DNF repo config are static assets of the gateway Worker,
+      # deployed by .github/workflows/gateway.yaml. Hold the branch to the whitelist so the split cannot
+      # silently erode.
       - name: Audit Metadata-Only Invariant
         run: |
-          allowed='^\./(\.nojekyll|kvrocks\.(gpg|asc|repo)|dists/|rpm/)'
+          allowed='^\./(\.nojekyll|kvrocks\.(gpg|asc)|dists/|rpm/)'
           stray=$(cd pages && find . -path ./.git -prune -o -type f -print | grep -Ev "$allowed" || true)
           leaked=$(find pages -name .git -prune -o -type f \( -name '*.deb' -o -name '*.rpm' \) -print)
 
@@ -796,10 +784,9 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ### Release ${RELEASE_TAG} published (\`${CHANNEL}\` channel)
           - **Release**: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}
-          - **APT**: \`${GATEWAY_URL%/} ${CHANNEL} main\`
-          - **RPM**: \`${GATEWAY_URL%/}/rpm/${CHANNEL}/\$basearch/\`
-          - **DNF repo config**: \`${GATEWAY_URL%/}/kvrocks.repo\`
-          - **GPG public key**: \`${GATEWAY_URL%/}/kvrocks.asc\`
+          - **APT metadata**: \`dists/${CHANNEL}/\`
+          - **RPM metadata**: \`rpm/${CHANNEL}/\$basearch/repodata/\`
+          - **GPG public keys**: \`kvrocks.gpg\`, \`kvrocks.asc\`
           EOF
 
       - name: Dry Run Summary
