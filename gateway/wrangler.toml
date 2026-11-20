@@ -1,7 +1,9 @@
 name = "kvrocks-repo-gateway"
 main = "src/index.js"
-compatibility_date = "2024-09-01"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2026-11-20"
+# Preserve optional dashboard-configured plaintext vars (METADATA_ORIGIN, UPSTREAM_REPO, RELEASE_REF)
+# across deploys that pass `--var GITHUB_REPO:...`.
+keep_vars = true
 
 # No `[vars]` here on purpose: nothing in this repository names the account or host it is deployed
 # under. GITHUB_REPO reaches the Worker from `scripts/render.mjs` (local dev, via `.dev.vars`) and from

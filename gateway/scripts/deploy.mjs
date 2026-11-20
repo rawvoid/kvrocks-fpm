@@ -16,7 +16,14 @@ import { render } from "./render.mjs";
 
 const gatewayDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
-const { slug } = render();
+if (!process.env.KVROCKS_GATEWAY_URL?.trim().replace(/\/+$/, "")) {
+  console.error(
+    "deploy: KVROCKS_GATEWAY_URL must be set so install.sh and kvrocks.repo do not ship with __REPO_ORIGIN__."
+  );
+  process.exit(1);
+}
+
+const { slug } = render({ writeDevVars: false });
 
 // Pinned major keeps CI and workstations on the same CLI; `--yes` keeps a non-interactive runner from
 // stalling on the install prompt. Extra arguments go to wrangler untouched, so

@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -46,11 +46,16 @@ function slugFromOriginRemote() {
 }
 
 function resolveSlug() {
-  const candidates = [process.env.GITHUB_REPOSITORY, process.env.KVROCKS_REPO_SLUG, slugFromOriginRemote()];
-  for (const candidate of candidates) {
-    const slug = candidate?.trim();
-    if (slug && SLUG_RE.test(slug)) return slug;
+  for (const name of ["GITHUB_REPOSITORY", "KVROCKS_REPO_SLUG"]) {
+    const value = process.env[name]?.trim();
+    if (!value) continue;
+    if (SLUG_RE.test(value)) return value;
+    console.error(`render: ${name} must be 'owner/repo', got '${value}'.`);
+    process.exit(1);
   }
+
+  const remoteSlug = slugFromOriginRemote();
+  if (remoteSlug && SLUG_RE.test(remoteSlug)) return remoteSlug;
 
   console.error(
     "render: cannot determine the repository slug.\n" +
@@ -83,23 +88,48 @@ function walk(dir, prefix = "") {
   });
 }
 
+/** Updates `key=value` in a `.dev.vars` file while preserving any other entries. */
+function upsertDevVar(filePath, key, value) {
+  const entry = `${key}=${value}`;
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, `${entry}\n`);
+    return;
+  }
+
+  const lines = readFileSync(filePath, "utf8").split(/\r?\n/);
+  if (lines.at(-1) === "") lines.pop();
+
+  const prefix = `${key}=`;
+  let updated = false;
+  const next = lines.map((line) => {
+    if (line.startsWith(prefix)) {
+      updated = true;
+      return entry;
+    }
+    return line;
+  });
+  if (!updated) next.push(entry);
+
+  writeFileSync(filePath, `${next.join("\n")}\n`);
+}
+
 /**
- * Renders `public/` into `dist/` and returns the values it resolved.
+ * Renders `public/` into `outDir` and returns the values it resolved.
  *
  * @returns {{ slug: string, origin: string|null }}
  */
-export function render() {
+export function render({ outDir = distDir, devVarsPath = join(gatewayDir, ".dev.vars"), writeDevVars = true } = {}) {
   const slug = resolveSlug();
   const origin = resolveOrigin();
 
-  rmSync(distDir, { recursive: true, force: true });
-  cpSync(publicDir, distDir, { recursive: true });
+  rmSync(outDir, { recursive: true, force: true });
+  cpSync(publicDir, outDir, { recursive: true });
 
   /** Replaces `placeholder` in every rendered file that contains it, returning the paths written. */
   function substitute(placeholder, value) {
     const written = [];
-    for (const rel of walk(distDir)) {
-      const path = join(distDir, rel);
+    for (const rel of walk(outDir)) {
+      const path = join(outDir, rel);
       const source = readFileSync(path, "utf8");
       if (!source.includes(placeholder)) continue;
 
@@ -114,7 +144,9 @@ export function render() {
 
   // `wrangler dev` reads local-only variables from `.dev.vars`; `wrangler deploy` does not, which is why
   // `scripts/deploy.mjs` passes the same value with `--var`.
-  writeFileSync(join(gatewayDir, ".dev.vars"), `GITHUB_REPO=${slug}\n`);
+  if (writeDevVars) {
+    upsertDevVar(devVarsPath, "GITHUB_REPO", slug);
+  }
 
   console.log(`render: repository ${slug}`);
   console.log(`render: origin ${origin ?? "(KVROCKS_GATEWAY_URL unset)"}`);

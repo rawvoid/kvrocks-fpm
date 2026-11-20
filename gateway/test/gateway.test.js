@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -580,18 +581,11 @@ test("worker.fetch - Static assets (/install.sh, /kvrocks.repo) are served by th
 
 // --- Asset Rendering --------------------------------------------------------
 
-/** Runs `render()` with temporary env overrides while preserving existing `dist/` and `.dev.vars`. */
-function withRenderEnv(overrides, fn) {
-  const gatewayDir = dirname(dirname(fileURLToPath(import.meta.url)));
-  const distDir = join(gatewayDir, "dist");
-  const devVarsPath = join(gatewayDir, ".dev.vars");
-  const backupDir = mkdtempSync(join(tmpdir(), "kvrocks-render-backup-"));
-  const hadDist = existsSync(distDir);
-  const hadDevVars = existsSync(devVarsPath);
-
-  if (hadDist) cpSync(distDir, join(backupDir, "dist"), { recursive: true });
-  if (hadDevVars) cpSync(devVarsPath, join(backupDir, ".dev.vars"));
-
+/** Runs `fn` inside a clean temporary directory with temporary env overrides. */
+function withTempRender(overrides, fn) {
+  const workDir = mkdtempSync(join(tmpdir(), "kvrocks-render-test-"));
+  const outDir = join(workDir, "dist");
+  const devVarsPath = join(workDir, ".dev.vars");
   const prevEnv = new Map();
   for (const [key, value] of Object.entries(overrides)) {
     prevEnv.set(key, process.env[key]);
@@ -600,30 +594,26 @@ function withRenderEnv(overrides, fn) {
   }
 
   try {
-    return fn(distDir);
+    return fn({ outDir, devVarsPath });
   } finally {
     for (const [key, value] of prevEnv) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    rmSync(distDir, { recursive: true, force: true });
-    rmSync(devVarsPath, { force: true });
-    if (hadDist) cpSync(join(backupDir, "dist"), distDir, { recursive: true });
-    if (hadDevVars) cpSync(join(backupDir, ".dev.vars"), devVarsPath);
-    rmSync(backupDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
   }
 }
 
 test("render - Substitutes __GITHUB_REPO__ and __REPO_ORIGIN__ across index.html, install.sh and kvrocks.repo", () => {
-  withRenderEnv(
+  withTempRender(
     { GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: "https://repo.example.com/" },
-    (distDir) => {
-      const result = render();
+    ({ outDir, devVarsPath }) => {
+      const result = render({ outDir, devVarsPath });
       assert.deepEqual(result, { slug: TEST_REPO, origin: "https://repo.example.com" });
 
-      const html = readFileSync(join(distDir, "index.html"), "utf8");
-      const installer = readFileSync(join(distDir, "install.sh"), "utf8");
-      const repoConfig = readFileSync(join(distDir, "kvrocks.repo"), "utf8");
+      const html = readFileSync(join(outDir, "index.html"), "utf8");
+      const installer = readFileSync(join(outDir, "install.sh"), "utf8");
+      const repoConfig = readFileSync(join(outDir, "kvrocks.repo"), "utf8");
 
       for (const content of [html, installer, repoConfig]) {
         assert.equal(content.includes("__GITHUB_REPO__"), false);
@@ -636,22 +626,50 @@ test("render - Substitutes __GITHUB_REPO__ and __REPO_ORIGIN__ across index.html
       assert.equal(repoConfig.includes("baseurl=https://repo.example.com/rpm/stable/$basearch/"), true);
       assert.equal(repoConfig.includes("baseurl=https://repo.example.com/rpm/testing/$basearch/"), true);
       assert.equal(repoConfig.includes("gpgkey=https://repo.example.com/kvrocks.asc"), true);
+      assert.equal(readFileSync(devVarsPath, "utf8"), `GITHUB_REPO=${TEST_REPO}\n`);
     }
   );
 });
 
 test("render - Leaves __REPO_ORIGIN__ unrendered when KVROCKS_GATEWAY_URL is unset", () => {
-  withRenderEnv({ GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: undefined }, (distDir) => {
-    const result = render();
+  withTempRender({ GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: undefined }, ({ outDir, devVarsPath }) => {
+    const result = render({ outDir, devVarsPath });
     assert.deepEqual(result, { slug: TEST_REPO, origin: null });
 
-    const html = readFileSync(join(distDir, "index.html"), "utf8");
-    const installer = readFileSync(join(distDir, "install.sh"), "utf8");
-    const repoConfig = readFileSync(join(distDir, "kvrocks.repo"), "utf8");
+    const html = readFileSync(join(outDir, "index.html"), "utf8");
+    const installer = readFileSync(join(outDir, "install.sh"), "utf8");
+    const repoConfig = readFileSync(join(outDir, "kvrocks.repo"), "utf8");
 
     assert.equal(html.includes("__GITHUB_REPO__"), false);
     assert.equal(html.includes("__REPO_ORIGIN__"), true);
     assert.equal(installer.includes('REPO_ORIGIN="__REPO_ORIGIN__"'), true);
     assert.equal(repoConfig.includes("baseurl=__REPO_ORIGIN__/rpm/stable/$basearch/"), true);
   });
+});
+
+test("render - Preserves existing keys in .dev.vars while updating GITHUB_REPO", () => {
+  withTempRender({ GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: undefined }, ({ outDir, devVarsPath }) => {
+    writeFileSync(devVarsPath, "# local secrets\nGITHUB_TOKEN=ghp_secret\nGITHUB_REPO=old/repo\nMETADATA_ORIGIN=https://custom.example.com\n");
+    render({ outDir, devVarsPath });
+
+    assert.equal(
+      readFileSync(devVarsPath, "utf8"),
+      `# local secrets\nGITHUB_TOKEN=ghp_secret\nGITHUB_REPO=${TEST_REPO}\nMETADATA_ORIGIN=https://custom.example.com\n`
+    );
+  });
+});
+
+test("deploy - Exits non-zero when KVROCKS_GATEWAY_URL is unset", () => {
+  const gatewayDir = dirname(dirname(fileURLToPath(import.meta.url)));
+  const env = { ...process.env, GITHUB_REPOSITORY: TEST_REPO };
+  delete env.KVROCKS_GATEWAY_URL;
+
+  const res = spawnSync(process.execPath, [join(gatewayDir, "scripts/deploy.mjs")], {
+    cwd: gatewayDir,
+    env,
+    encoding: "utf8",
+  });
+
+  assert.notEqual(res.status, 0);
+  assert.match(res.stderr, /KVROCKS_GATEWAY_URL must be set/);
 });
