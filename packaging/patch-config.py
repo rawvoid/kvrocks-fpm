@@ -10,6 +10,7 @@ so the run aborts instead.
 
 import os
 import re
+import stat
 import sys
 import tempfile
 from typing import Dict, List, Optional
@@ -71,12 +72,22 @@ def patch_config(file_path: str, directives: Dict[str, str]) -> None:
         )
         sys.exit(1)
 
+    orig_mode = stat.S_IMODE(os.stat(file_path).st_mode)
     dir_name = os.path.dirname(os.path.abspath(file_path))
-    with tempfile.NamedTemporaryFile("w", dir=dir_name, encoding="utf-8", delete=False) as tf:
-        tf.writelines(lines)
-        temp_name = tf.name
-
-    os.replace(temp_name, file_path)
+    temp_name: Optional[str] = None
+    try:
+        with tempfile.NamedTemporaryFile("w", dir=dir_name, encoding="utf-8", delete=False) as tf:
+            temp_name = tf.name
+            tf.writelines(lines)
+        os.chmod(temp_name, orig_mode)
+        os.replace(temp_name, file_path)
+    except Exception:
+        if temp_name is not None:
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+        raise
 
 
 def main() -> None:

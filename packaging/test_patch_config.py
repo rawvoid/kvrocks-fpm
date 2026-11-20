@@ -5,9 +5,11 @@ Unit tests for patch-config.py.
 
 import importlib.util
 import os
+import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # Import patch-config.py dynamically due to hyphen in filename
 script_path = os.path.join(os.path.dirname(__file__), "patch-config.py")
@@ -172,6 +174,21 @@ class TestPatchConfig(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 patch_config("/nonexistent/path/kvrocks.conf", {"dir": "/var/lib/kvrocks"})
             self.assertEqual(cm.exception.code, 1)
+
+    def test_preserves_original_file_permissions(self):
+        self._write_conf("dir /tmp/old\n")
+        os.chmod(self.conf_path, 0o644)
+        patch_config(self.conf_path, {"dir": "/var/lib/kvrocks"})
+        self.assertEqual(stat.S_IMODE(os.stat(self.conf_path).st_mode), 0o644)
+
+    def test_failed_replace_keeps_original_and_cleans_temp_file(self):
+        initial = "dir /tmp/old\n"
+        self._write_conf(initial)
+        with patch.object(patch_config_module.os, "replace", side_effect=OSError("replace failed")):
+            with self.assertRaises(OSError):
+                patch_config(self.conf_path, {"dir": "/var/lib/kvrocks"})
+        self.assertEqual(self._read_conf(), initial)
+        self.assertEqual(os.listdir(self.temp_dir.name), ["kvrocks.conf"])
 
 
 if __name__ == "__main__":

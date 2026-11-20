@@ -17,11 +17,12 @@ if [ "$should_stop" -eq 1 ]; then
             deb-systemd-invoke stop kvrocks.service >/dev/null 2>&1 || true
         else
             systemctl stop kvrocks >/dev/null 2>&1 || true
-            systemctl disable kvrocks >/dev/null 2>&1 || true
         fi
     fi
     if [ "$1" = remove ]; then
         deb-systemd-helper disable kvrocks.service >/dev/null 2>&1 || true
+    elif command -v systemctl >/dev/null 2>&1; then
+        systemctl --no-reload disable kvrocks >/dev/null 2>&1 || true
     fi
 fi
 
