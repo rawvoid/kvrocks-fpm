@@ -12,6 +12,14 @@
 
 set -euo pipefail
 
+_TMP_FILES=()
+cleanup_tmp_files() {
+    if [ "${#_TMP_FILES[@]}" -gt 0 ]; then
+        rm -f "${_TMP_FILES[@]}"
+    fi
+}
+trap cleanup_tmp_files EXIT
+
 # Filled in by `scripts/render.mjs` from the KVROCKS_GATEWAY_URL repository variable, so the installer
 # carries no host of its own and a fork needs no edit: the origin always matches the repository the
 # packages come from.
@@ -54,7 +62,7 @@ fetch_file() {
 
     local tmp_file
     tmp_file="$(mktemp)"
-    trap 'rm -f "$tmp_file"' EXIT
+    _TMP_FILES+=("$tmp_file")
 
     if command -v curl >/dev/null 2>&1; then
         if ! curl -fsSL "$url" -o "$tmp_file"; then
@@ -74,7 +82,6 @@ fetch_file() {
 
     install -m "$mode" "$tmp_file" "$dest"
     rm -f "$tmp_file"
-    trap - EXIT
 }
 
 write_apt_sources() {
@@ -228,9 +235,10 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
     CPU_DETAIL="Standard (${ARCH})"
 
     if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ]; then
-        # Check if host CPU supports x86-64-v3 (AVX2 and BMI2)
+        # Check if host CPU supports x86-64-v3 plus pclmulqdq (-march=x86-64-v3 -mpclmul)
         if grep -qw "avx2" /proc/cpuinfo 2>/dev/null && \
-           grep -qw "bmi2" /proc/cpuinfo 2>/dev/null; then
+           grep -qw "bmi2" /proc/cpuinfo 2>/dev/null && \
+           grep -qw "pclmulqdq" /proc/cpuinfo 2>/dev/null; then
             TARGET_PACKAGE="kvrocks"
             CPU_DETAIL="Optimized (x86-64-v3 / AVX2 & BMI2)"
         else
@@ -308,7 +316,15 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
 
         info "Fetching repository GPG signing key..."
         fetch_file "${REPO_URL}/kvrocks.asc" "$KEY_FILE" 0644
-        rpm --import "$KEY_FILE" 2>/dev/null || true
+        if ! rpm --import "$KEY_FILE"; then
+            error "Failed to import RPM GPG key from $KEY_FILE."
+        fi
+
+        TESTING_ENABLED=0
+        if [ "$CHANNEL" = "testing" ]; then
+            info "Enabling kvrocks-testing repository channel..."
+            TESTING_ENABLED=1
+        fi
 
         # Write repository configuration dynamically using REPO_URL
         cat > "$REPO_FILE" << EOF
@@ -319,28 +335,20 @@ enabled=1
 gpgcheck=1
 repo_gpgcheck=1
 gpgkey=file://${KEY_FILE}
-       ${REPO_URL}/kvrocks.asc
 
 [kvrocks-testing]
 name=Apache Kvrocks Testing Repository
 baseurl=${REPO_URL}/rpm/testing/\$basearch/
-enabled=0
+enabled=${TESTING_ENABLED}
 gpgcheck=1
 repo_gpgcheck=1
 gpgkey=file://${KEY_FILE}
-       ${REPO_URL}/kvrocks.asc
 EOF
         chmod 0644 "$REPO_FILE"
 
         # 5. Install package via DNF
-        RPM_EXTRA_OPTS=()
-        if [ "$CHANNEL" = "testing" ]; then
-            info "Enabling kvrocks-testing repository channel..."
-            RPM_EXTRA_OPTS+=(--enablerepo=kvrocks-testing)
-        fi
-
         info "Installing ${TARGET_PACKAGE} via dnf (${CHANNEL})..."
-        dnf install -y --refresh --allowerasing "${RPM_EXTRA_OPTS[@]}" "${TARGET_PACKAGE}"
+        dnf install -y --refresh --allowerasing "${TARGET_PACKAGE}"
     fi
 
     # 6. Installation verification and summary
