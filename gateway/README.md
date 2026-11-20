@@ -12,7 +12,7 @@ supplied at build and deploy time, so a fork works without editing a single file
 
 ```
 gateway/
-├── wrangler.toml        # routes + the static asset directory
+├── wrangler.toml        # worker config, static assets, Cron trigger & observability
 ├── src/
 │   ├── index.js         # Worker entrypoint ({ fetch, scheduled })
 │   ├── packages.js      # /pool/*.deb & /rpm/**.rpm release proxy + edge cache
@@ -123,9 +123,10 @@ npm test                                                     # unit tests
 Neither command needs `--var`: `scripts/deploy.mjs` renders first and hands the resolved slug to
 wrangler, because `wrangler deploy` — unlike `wrangler dev` — does not read `.dev.vars`.
 
-Without `KVROCKS_GATEWAY_URL` the page still builds (falling back to `window.location.origin`); the
-installer and `kvrocks.repo` keep their placeholder, and the installer refuses to run until it is
-given `KVROCKS_REPO_URL`.
+Without `KVROCKS_GATEWAY_URL`, `npm run build` and `npm run dev` still work for local testing (the
+page falls back to `window.location.origin`, while `install.sh` and `kvrocks.repo` keep
+`__REPO_ORIGIN__` and the installer asks for `KVROCKS_REPO_URL`), whereas `npm run deploy`
+requires `KVROCKS_GATEWAY_URL` so unrendered placeholders are never shipped.
 
 `npm run deploy -- --dry-run` validates the configuration and lists the uploaded assets without
 touching the account.

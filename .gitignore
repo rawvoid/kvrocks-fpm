@@ -19,3 +19,8 @@ SHA256SUMS
 .wrangler/
 node_modules/
 .dev.vars
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/

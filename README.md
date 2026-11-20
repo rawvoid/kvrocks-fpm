@@ -106,17 +106,14 @@ Removal stops and disables the service (Debian stop requests remain subject to `
 Production binaries are stripped (`strip --strip-unneeded`) to minimize package footprint. If a coredump occurs or you need source-line CPU profiling with `perf`, download the matching companion debug archive without restarting or altering the live service:
 
 ```bash
-# 1. Download and extract companion debug symbols (example for 2.15.0-1 amd64)
+# 1. Option A (Extract into standard system debug directory, auto-discovered by GDB/perf):
+sudo tar -xzf kvrocks-debuginfo_2.15.0-1_amd64.tar.gz -C /
+
+# 2. Option B (Extract locally and inspect coredump without modifying /usr):
 tar -xzf kvrocks-debuginfo_2.15.0-1_amd64.tar.gz
+gdb /usr/bin/kvrocks -ex "set debug-file-directory ./usr/lib/debug" /var/crash/core.kvrocks
 
-# 2. Option A (Standard system debug directory, auto-discovered by GDB/perf):
-sudo mkdir -p /usr/lib/debug/usr/bin
-sudo cp kvrocks.debug /usr/lib/debug/usr/bin/
-
-# 3. Option B (Inspect coredump with explicit debug directory in GDB):
-gdb /usr/bin/kvrocks -ex "set debug-file-directory ." /var/crash/core.kvrocks
-
-# 4. Source-level CPU hotspot profiling with Linux perf:
+# 3. Source-level CPU hotspot profiling with Linux perf (using local extraction from Option B):
 perf record -g -p $(pgrep kvrocks) -- sleep 30
 perf report --symfs .
 ```
@@ -149,7 +146,7 @@ perf report --symfs .
 The active configuration file `/etc/kvrocks/kvrocks.conf` is marked as a protected configuration file (`conffile` in Debian/Ubuntu, `%config(noreplace)` in RPM/RHEL/Fedora).
 
 - **Default permissions**: The configuration is `kvrocks:kvrocks` mode `0640`; `/etc/kvrocks` is `root:kvrocks` mode `0775`, allowing same-directory file replacement for `CONFIG REWRITE`. RPM records these owner/group names in package metadata rather than repairing the active configuration in postinst. Configuration changes after `CONFIG REWRITE` can legitimately appear in `rpm -V`.
-- **Debian permission initialization**: Preinst creates the service user and group before payload extraction. Postinst initializes directory permissions (`/etc/kvrocks` as `root:kvrocks 0775`, state/log as `0750`) and configuration permissions (`kvrocks:kvrocks 0640`), strictly refusing symlinks to prevent privilege escalation.
+- **Debian permission initialization**: Preinst creates the service user and group before payload extraction. On fresh installation or flavor switch, postinst initializes directory permissions (`/etc/kvrocks` as `root:kvrocks 0775`, state/log as `0750`) and configuration permissions (`kvrocks:kvrocks 0640`), strictly refusing symlinks to prevent privilege escalation, while preserving custom permissions across same-name upgrades.
 - **Protection Against Overwrites**: When Kvrocks executes `CONFIG REWRITE` or when you customize the configuration (e.g., setting `requirepass` or adjusting caching parameters), your active changes will **never** be silently overwritten during package upgrades.
 - **Debian / Ubuntu**: Upgrades performed via `install.sh` automatically preserve your active configuration non-interactively using dpkg's `--force-confdef --force-confold` flags. A bare `apt-get upgrade` may still present the conffile prompt; answer "keep the currently-installed version" to retain your settings.
 - **RHEL / Rocky / AlmaLinux / Fedora**: If your active configuration differs from the newly installed release defaults, RPM preserves your current `/etc/kvrocks/kvrocks.conf` and saves the maintainer's new template to `/etc/kvrocks/kvrocks.conf.rpmnew`. You can review the new directives and safely remove the `.rpmnew` file:
