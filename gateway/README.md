@@ -77,10 +77,13 @@ without invoking the Worker**, everything else reaches `src/index.js`.
 4. **Automated upstream release watcher**
    - `wrangler.toml` configures an hourly Cron Trigger (`[triggers] crons = ["0 * * * *"]`) invoking
      the Worker's `scheduled` handler.
-   - On each tick, it reads the latest 10 tags from `apache/kvrocks` (`tags.atom`, unauthenticated),
-     compares them against published GitHub Releases and recent `release.yaml` workflow runs in
-     `GITHUB_REPO`, and queues any newer versions (both GA and `-rc` pre-releases) via
-     `workflow_dispatch` in ascending order.
+   - On each tick, it fetches full `refs/tags/` lists via Git Wire Protocol v2 (`ls-refs`) from both
+     `apache/kvrocks` (unauthenticated) and `GITHUB_REPO` (with `GITHUB_TOKEN`), inspects recent
+     `release.yaml` `workflow_dispatch` runs, and evaluates all upstream versions `>= MIN_VERSION`
+     (default `2.13.0`), skipping superseded `-rc` pre-releases while keeping active ones.
+   - To preserve strict release ordering, it waits whenever a non-dry-run release workflow is active
+     and dispatches at most one oldest missing version per tick, retrying the head-of-line version
+     up to `MAX_ATTEMPTS` (default `3`) completed attempts before halting for manual intervention.
 
 ---
 

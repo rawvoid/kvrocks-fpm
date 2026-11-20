@@ -1,8 +1,8 @@
 name = "kvrocks-repo-gateway"
 main = "src/index.js"
 compatibility_date = "2026-11-20"
-# Preserve optional dashboard-configured plaintext vars (METADATA_ORIGIN, UPSTREAM_REPO, RELEASE_REF)
-# across deploys that pass `--var GITHUB_REPO:...`.
+# Preserve optional dashboard-configured plaintext vars (METADATA_ORIGIN, UPSTREAM_REPO, RELEASE_REF,
+# MIN_VERSION, MAX_ATTEMPTS) across deploys that pass `--var GITHUB_REPO:...`.
 keep_vars = true
 
 # No `[vars]` here on purpose: nothing in this repository names the account or host it is deployed

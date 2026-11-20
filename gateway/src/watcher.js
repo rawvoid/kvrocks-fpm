@@ -1,30 +1,31 @@
 /**
- * Upstream release watcher (Cron Trigger): inspects the latest upstream Apache Kvrocks tags from
- * `tags.atom`, compares them against published GitHub Releases and recent workflow runs in
- * `GITHUB_REPO`, and queues `release.yaml` dispatches in ascending version order.
+ * Upstream release watcher (Cron Trigger): queries full tag lists via Git Wire Protocol v2
+ * (`ls-refs`) for both the upstream repository and `GITHUB_REPO`, checks recent `release.yaml`
+ * `workflow_dispatch` runs, and dispatches at most one oldest pending version (`>= MIN_VERSION`)
+ * per tick with head-of-line retry bounding (`MAX_ATTEMPTS`).
  */
 
 import { USER_AGENT } from "./shared.js";
 
 const DEFAULT_UPSTREAM_REPO = "apache/kvrocks";
 const DEFAULT_RELEASE_REF = "main";
+export const DEFAULT_MIN_VERSION = "2.13.0";
+export const DEFAULT_MAX_ATTEMPTS = 3;
 const RELEASE_WORKFLOW = "release.yaml";
+const GIT_LS_REFS_TAGS_BODY = "0014command=ls-refs\n0001001aref-prefix refs/tags/\n0000";
+
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 // Matches the upstream version syntax accepted by .github/workflows/release.yaml (e.g. 2.17.0, 2.17.0-rc1).
 const VERSION_CORE = "[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:\\.[0-9A-Za-z]+)*)?";
 const UPSTREAM_VERSION_RE = /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$/;
 const UPSTREAM_TAG_RE = new RegExp(`^(?:refs/tags/)?v(${VERSION_CORE})$`);
+const LOOSE_UPSTREAM_TAG_RE = /^(?:refs\/tags\/)?v([0-9]+\.[0-9]+\.[0-9]+)(?:[^0-9].*)$/;
 const PACKAGED_TAG_RE = new RegExp(`^(?:refs/tags/)?v(${VERSION_CORE})-[1-9][0-9]*$`);
 // Deliberately excludes `(dry-run)` run titles so dry runs never suppress an automated release.
 const RELEASE_RUN_TITLE_RE = new RegExp(`^Release vv?(${VERSION_CORE})-[1-9][0-9]*$`);
 const RELEASE_RUN_ANY_TITLE_RE = /^Release vv?(.+)-[1-9][0-9]*$/;
-
-const isPrerelease = (version) => version.includes("-");
-
-function minorSeries(version) {
-  const { major, minor } = parseVersion(version);
-  return `${major}.${minor}`;
-}
 
 function parseVersion(version) {
   const match = String(version ?? "").match(UPSTREAM_VERSION_RE);
@@ -37,6 +38,35 @@ function parseVersion(version) {
     patch: Number(match[3]),
     prerelease: match[4],
   };
+}
+
+function normalizeMinVersion(value, defaultValue = DEFAULT_MIN_VERSION) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return defaultValue;
+  }
+  const normalized = String(value).trim().replace(/^v/, "");
+  try {
+    parseVersion(normalized);
+  } catch {
+    throw new Error(
+      `Gateway Misconfiguration: MIN_VERSION must be a valid version (e.g. 2.13.0), got '${value}'.`
+    );
+  }
+  return normalized;
+}
+
+function normalizeMaxAttempts(value, defaultValue = DEFAULT_MAX_ATTEMPTS) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return defaultValue;
+  }
+  const raw = String(value).trim();
+  const num = Number(raw);
+  if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(num)) {
+    throw new Error(
+      `Gateway Misconfiguration: MAX_ATTEMPTS must be a positive integer, got '${value}'.`
+    );
+  }
+  return num;
 }
 
 /**
@@ -106,152 +136,181 @@ function dropSupersededPrereleases(versions) {
 }
 
 /**
- * Extracts tag names from a GitHub repository's `/tags.atom` feed (newest-first).
+ * Decodes a Git Wire Protocol v2 `ls-refs` pkt-line response into tag entries (`{ name }`).
  *
- * @param {string} xml Atom XML response body
- * @returns {Array<{name: string}>} Ordered tag entries
+ * @param {string|Uint8Array|ArrayBuffer} input Raw pkt-line response body
+ * @returns {Array<{name: string}>} Tag entries stripped of `refs/tags/`
  */
-export function parseUpstreamTagsAtom(xml) {
-  if (typeof xml !== "string" || !/<feed[\s>]/i.test(xml)) {
-    throw new Error("Upstream tags feed returned invalid Atom XML");
+export function parseGitLsRefs(input) {
+  let bytes;
+  if (typeof input === "string") {
+    bytes = UTF8_ENCODER.encode(input);
+  } else if (input instanceof Uint8Array) {
+    bytes = input;
+  } else if (input instanceof ArrayBuffer) {
+    bytes = new Uint8Array(input);
+  } else {
+    throw new Error("Git ls-refs returned invalid pkt-line response");
   }
 
   const tags = [];
-  for (const entry of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/gi)) {
-    const linkMatch = entry[1].match(/<link\b[^>]*\bhref=["'][^"']*\/releases\/tag\/([^"'?#]+)["']/i);
-    if (!linkMatch) continue;
-    try {
-      tags.push({ name: decodeURIComponent(linkMatch[1]) });
-    } catch {
-      tags.push({ name: linkMatch[1] });
+  let offset = 0;
+  let ended = false;
+
+  while (offset < bytes.length) {
+    if (offset + 4 > bytes.length) {
+      throw new Error("Git ls-refs returned invalid pkt-line response");
+    }
+
+    const hex = UTF8_DECODER.decode(bytes.subarray(offset, offset + 4));
+    if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
+      throw new Error("Git ls-refs returned invalid pkt-line response");
+    }
+
+    const len = parseInt(hex, 16);
+    if (len === 0) {
+      ended = true;
+      offset += 4;
+      if (offset < bytes.length) {
+        const trailingEnd =
+          offset + 4 === bytes.length &&
+          UTF8_DECODER.decode(bytes.subarray(offset, offset + 4)) === "0002";
+        if (!trailingEnd) {
+          throw new Error("Git ls-refs returned invalid pkt-line response");
+        }
+      }
+      break;
+    }
+    if (len === 2) {
+      ended = true;
+      offset += 4;
+      if (offset !== bytes.length) {
+        throw new Error("Git ls-refs returned invalid pkt-line response");
+      }
+      break;
+    }
+    if (len === 1) {
+      offset += 4;
+      continue;
+    }
+    if (len < 4 || offset + len > bytes.length) {
+      throw new Error("Git ls-refs returned invalid pkt-line response");
+    }
+
+    const line = UTF8_DECODER.decode(bytes.subarray(offset + 4, offset + len)).replace(/\r?\n$/, "");
+    offset += len;
+
+    if (line.startsWith("ERR ")) {
+      throw new Error(`Git ls-refs error: ${line.slice(4)}`);
+    }
+
+    const [oid, ref] = line.split(" ");
+    if (/^[0-9a-f]{40,64}$/i.test(oid ?? "") && ref?.startsWith("refs/tags/") && !ref.endsWith("^{}")) {
+      tags.push({ name: ref.slice("refs/tags/".length) });
     }
   }
+
+  if (!ended) {
+    throw new Error("Git ls-refs returned invalid pkt-line response");
+  }
+
   return tags;
 }
 
 /**
- * Selects upstream Kvrocks versions that should be dispatched to `release.yaml` (oldest-to-newest).
+ * Selects the next upstream Kvrocks version to dispatch to `release.yaml` (at most one per tick).
  *
- * - Ignores `(dry-run)` runs completely; waits only when an active non-dry-run workflow does not
- *   expose its target version in `display_title`.
- * - Compares the latest upstream tags against published (non-draft) releases and prior
- *   `workflow_dispatch` runs so failed or already-queued versions are never re-triggered.
- * - Drops superseded pre-releases when a newer pre-release or GA for the same `major.minor.patch`
- *   exists, while queueing distinct new versions in ascending order via `release.yaml` (`queue: max`).
- * - Passes unrecognized tags above the current baseline through to `release.yaml` once so its
- *   preflight validation reports the anomaly via GitHub notifications instead of silently ignoring it.
+ * - Waits whenever any non-dry-run workflow run is still active (`status !== "completed"`).
+ * - Considers all upstream tags `>= minVersion`, dropping superseded RCs (Strategy A) and
+ *   subtracting all locally published packaged tags (`v<version>-<iteration>`).
+ * - Locks strictly onto the oldest missing version (`head = missingVersions[0]`) without ever
+ *   skipping ahead; retries `head` up to `maxAttempts` completed non-dry-run runs before halting.
+ * - Only when no valid version is missing, surfaces an unrecognized version-like upstream tag
+ *   (`>= minVersion`) once to trigger `release.yaml` preflight notification.
  *
- * @param {Array<string|{name?: string, ref?: string}>} upstreamTags Upstream Git tags (newest-first)
- * @param {Array<string|{tag_name?: string, draft?: boolean, ref?: string, name?: string}>} packagedReleases Local releases
+ * @param {Array<string|{name?: string, ref?: string}>} upstreamTags Full upstream Git tags
+ * @param {Array<string|{tag_name?: string, draft?: boolean, ref?: string, name?: string}>} packagedTags Full local packaged tags
  * @param {Array<{status?: string, display_title?: string}>} [workflowRuns=[]] Recent release.yaml runs
- * @returns {string[]} Versions to dispatch (without leading "v"), ordered oldest-to-newest
+ * @param {{minVersion?: string, maxAttempts?: number|string}} [options={}] Watcher thresholds
+ * @returns {string[]} Zero or one version to dispatch (without leading "v")
  */
-export function selectPendingReleaseVersions(upstreamTags, packagedReleases, workflowRuns = []) {
+export function selectPendingReleaseVersions(
+  upstreamTags,
+  packagedTags,
+  workflowRuns = [],
+  options = {}
+) {
+  const minVersion = normalizeMinVersion(options?.minVersion);
+  const maxAttempts = normalizeMaxAttempts(options?.maxAttempts);
+
   const runs = Array.isArray(workflowRuns) ? workflowRuns : [];
   const nonDryRuns = runs.filter(
     (run) => !String(run?.display_title ?? "").endsWith("(dry-run)")
   );
 
-  // Wait only when an active run's title does not identify which version it is building.
-  const hasUnknownActiveRun = nonDryRuns.some(
-    (run) =>
-      run?.status &&
-      run.status !== "completed" &&
-      !RELEASE_RUN_ANY_TITLE_RE.test(String(run.display_title ?? ""))
-  );
-  if (hasUnknownActiveRun) return [];
+  // Strict single-flight guard: never queue a second run behind an active release.
+  if (nonDryRuns.some((run) => run?.status && run.status !== "completed")) {
+    return [];
+  }
 
   if (!Array.isArray(upstreamTags) || upstreamTags.length === 0) return [];
 
-  const nonDraftReleases = Array.isArray(packagedReleases)
-    ? packagedReleases.filter((item) => typeof item === "string" || !item?.draft)
+  const nonDraftPackaged = Array.isArray(packagedTags)
+    ? packagedTags.filter((item) => typeof item === "string" || !item?.draft)
     : [];
+  const packagedSet = new Set(extractVersions(nonDraftPackaged, PACKAGED_TAG_RE, getTagText));
 
-  const packagedVersions = extractVersions(nonDraftReleases, PACKAGED_TAG_RE, getTagText);
-  const dispatchedVersions = extractVersions(
-    nonDryRuns,
-    RELEASE_RUN_TITLE_RE,
-    (run) => run?.display_title ?? ""
-  );
-  const knownVersions = [...new Set([...packagedVersions, ...dispatchedVersions])].sort(compareVersions);
-  const knownSet = new Set(knownVersions);
-  const overallBaseline = knownVersions.at(-1) ?? null;
-  const stableKnown = knownVersions.filter((v) => !isPrerelease(v));
-  const stableBaseline = stableKnown.at(-1) ?? null;
-  const seriesStableBaseline = new Map();
-  for (const version of stableKnown) {
-    seriesStableBaseline.set(minorSeries(version), version);
-  }
-
-  const dispatchedRawVersions = new Set(dispatchedVersions);
+  const attemptCounts = new Map();
+  const dispatchedRawVersions = new Set();
   for (const run of nonDryRuns) {
-    const match = String(run?.display_title ?? "").match(RELEASE_RUN_ANY_TITLE_RE);
-    if (match) dispatchedRawVersions.add(match[1]);
+    const title = String(run?.display_title ?? "");
+    const validMatch = title.match(RELEASE_RUN_TITLE_RE);
+    if (validMatch) {
+      const version = validMatch[1];
+      attemptCounts.set(version, (attemptCounts.get(version) ?? 0) + 1);
+    }
+    const anyMatch = title.match(RELEASE_RUN_ANY_TITLE_RE);
+    if (anyMatch) {
+      dispatchedRawVersions.add(anyMatch[1]);
+    }
   }
 
-  if (overallBaseline === null) {
-    const newestName = String(getTagText(upstreamTags[0]) ?? "").replace(/^refs\/tags\//, "");
-    if (newestName && !UPSTREAM_TAG_RE.test(newestName)) {
-      const rawVersion = newestName.replace(/^v/, "");
-      return rawVersion && !dispatchedRawVersions.has(rawVersion) ? [rawVersion] : [];
-    }
-    const upstreamVersions = extractVersions(upstreamTags, UPSTREAM_TAG_RE, getTagText);
-    const deduped = dropSupersededPrereleases(upstreamVersions);
-    const latest = deduped.at(-1);
-    if (!latest) return [];
-    if (isPrerelease(latest)) {
-      const latestStable = deduped.filter((v) => !isPrerelease(v)).at(-1);
-      if (latestStable) return [latestStable, latest];
-    }
-    return [latest];
+  const upstreamValid = extractVersions(upstreamTags, UPSTREAM_TAG_RE, getTagText).filter(
+    (version) => compareVersions(version, minVersion) >= 0
+  );
+  const targetVersions = dropSupersededPrereleases(upstreamValid);
+  const missingVersions = targetVersions.filter((version) => !packagedSet.has(version));
+
+  // Head-of-line lock: always evaluate attempts on missingVersions[0] before anything else so
+  // repeated failures halt the pipeline instead of skipping ahead out of order.
+  if (missingVersions.length > 0) {
+    const head = missingVersions[0];
+    return (attemptCounts.get(head) ?? 0) < maxAttempts ? [head] : [];
   }
 
-  const validNew = new Set();
-  const bootstrapStables = [];
-  const invalidNew = [];
-  let seenBaselineOrOlder = false;
-
+  const seenInvalid = new Set();
+  const invalidCandidates = [];
   for (const item of upstreamTags) {
     const rawName = String(getTagText(item) ?? "").replace(/^refs\/tags\//, "");
-    if (!rawName) continue;
+    if (!rawName || UPSTREAM_TAG_RE.test(rawName)) continue;
 
-    const match = rawName.match(UPSTREAM_TAG_RE);
-    if (match) {
-      const version = match[1];
-      if (compareVersions(version, overallBaseline) <= 0) {
-        seenBaselineOrOlder = true;
-      }
-      if (knownSet.has(version)) continue;
+    const looseMatch = rawName.match(LOOSE_UPSTREAM_TAG_RE);
+    if (!looseMatch) continue;
 
-      if (!isPrerelease(version)) {
-        if (stableBaseline === null) {
-          bootstrapStables.push(version);
-        } else if (compareVersions(version, stableBaseline) > 0) {
-          validNew.add(version);
-        } else {
-          const seriesBaseline = seriesStableBaseline.get(minorSeries(version));
-          if (seriesBaseline && compareVersions(version, seriesBaseline) > 0) {
-            validNew.add(version);
-          }
-        }
-      } else if (compareVersions(version, overallBaseline) > 0) {
-        validNew.add(version);
-      }
-    } else if (!seenBaselineOrOlder) {
-      const rawVersion = rawName.replace(/^v/, "");
-      if (rawVersion && !dispatchedRawVersions.has(rawVersion) && !invalidNew.includes(rawVersion)) {
-        invalidNew.push(rawVersion);
-      }
-    }
+    const base = looseMatch[1];
+    if (compareVersions(base, minVersion) < 0) continue;
+
+    const raw = rawName.replace(/^v/, "");
+    if (!raw || dispatchedRawVersions.has(raw) || seenInvalid.has(raw)) continue;
+
+    seenInvalid.add(raw);
+    invalidCandidates.push({ base, raw });
   }
 
-  if (bootstrapStables.length > 0) {
-    bootstrapStables.sort(compareVersions);
-    validNew.add(bootstrapStables.at(-1));
-  }
-
-  const candidates = dropSupersededPrereleases([...validNew].sort(compareVersions));
-  return [...candidates, ...invalidNew.reverse()];
+  invalidCandidates.sort(
+    (a, b) => compareVersions(a.base, b.base) || a.raw.localeCompare(b.raw)
+  );
+  return invalidCandidates.length > 0 ? [invalidCandidates[0].raw] : [];
 }
 
 function githubApiHeaders(token) {
@@ -277,6 +336,35 @@ async function fetchGitHub(url, init, label) {
   return res;
 }
 
+async function fetchGitTags(repo, label, token = null) {
+  const headers = {
+    "Git-Protocol": "version=2",
+    "Content-Type": "application/x-git-upload-pack-request",
+    Accept: "application/x-git-upload-pack-result",
+    "User-Agent": USER_AGENT,
+  };
+  if (token) {
+    headers.Authorization = `Basic ${btoa(`x-access-token:${token}`)}`;
+  }
+
+  const res = await fetchGitHub(
+    `https://github.com/${repo}.git/git-upload-pack`,
+    {
+      method: "POST",
+      headers,
+      body: GIT_LS_REFS_TAGS_BODY,
+    },
+    label
+  );
+  return parseGitLsRefs(await res.arrayBuffer());
+}
+
+/**
+ * Checks upstream tags against locally packaged tags and dispatches at most one pending release.
+ *
+ * @param {object} env Worker environment bindings
+ * @returns {Promise<{dispatched: boolean, versions: string[]}>} Dispatch summary
+ */
 export async function checkAndDispatchRelease(env) {
   const githubRepo = env?.GITHUB_REPO;
   const githubToken = env?.GITHUB_TOKEN;
@@ -290,44 +378,27 @@ export async function checkAndDispatchRelease(env) {
     throw new Error("Gateway Misconfiguration: GITHUB_TOKEN secret must be configured.");
   }
 
+  const minVersion = normalizeMinVersion(env?.MIN_VERSION);
+  const maxAttempts = normalizeMaxAttempts(env?.MAX_ATTEMPTS);
+
   const headers = githubApiHeaders(githubToken);
-  const [upstreamRes, releasesRes, runsRes] = await Promise.all([
-    fetchGitHub(
-      `https://github.com/${upstreamRepo}/tags.atom`,
-      {
-        headers: {
-          Accept: "application/atom+xml, application/xml",
-          "User-Agent": USER_AGENT,
-        },
-      },
-      "upstream tags"
-    ),
-    fetchGitHub(
-      `https://api.github.com/repos/${githubRepo}/releases?per_page=15`,
-      { headers },
-      "packaged releases"
-    ),
+  const [upstreamTags, packagedTags, runsData] = await Promise.all([
+    fetchGitTags(upstreamRepo, "upstream tags"),
+    fetchGitTags(githubRepo, "packaged tags", githubToken),
     fetchGitHub(
       `https://api.github.com/repos/${githubRepo}/actions/workflows/${RELEASE_WORKFLOW}/runs?event=workflow_dispatch&per_page=100`,
       { headers },
       "workflow runs"
-    ),
+    ).then((res) => res.json()),
   ]);
 
-  const [upstreamXml, packagedReleases, runsData] = await Promise.all([
-    upstreamRes.text(),
-    releasesRes.json(),
-    runsRes.json(),
-  ]);
-
-  const upstreamTags = parseUpstreamTagsAtom(upstreamXml);
   const versions = selectPendingReleaseVersions(
     upstreamTags,
-    packagedReleases,
-    runsData?.workflow_runs ?? []
+    packagedTags,
+    runsData?.workflow_runs ?? [],
+    { minVersion, maxAttempts }
   );
 
-  // Dispatch oldest-to-newest sequentially so release.yaml (`queue: max`) processes them in order.
   for (const version of versions) {
     const dispatchRes = await fetchGitHub(
       `https://api.github.com/repos/${githubRepo}/actions/workflows/${RELEASE_WORKFLOW}/dispatches`,
@@ -342,6 +413,8 @@ export async function checkAndDispatchRelease(env) {
   }
 
   const dispatched = versions.length > 0;
-  console.log(JSON.stringify({ event: "watcher", upstreamRepo, githubRepo, dispatched, versions }));
+  console.log(
+    JSON.stringify({ event: "watcher", upstreamRepo, githubRepo, minVersion, maxAttempts, dispatched, versions })
+  );
   return { dispatched, versions };
 }

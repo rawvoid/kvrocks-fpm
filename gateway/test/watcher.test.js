@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import worker from "../src/index.js";
 import {
   compareVersions,
-  parseUpstreamTagsAtom,
+  DEFAULT_MAX_ATTEMPTS,
+  DEFAULT_MIN_VERSION,
+  parseGitLsRefs,
   selectPendingReleaseVersions,
 } from "../src/watcher.js";
 
@@ -12,6 +14,27 @@ const SCHEDULE_ENV = {
   GITHUB_REPO: TEST_REPO,
   GITHUB_TOKEN: "ghp_test_token_123",
 };
+
+const UTF8_ENCODER = new TextEncoder();
+const FAKE_OID = "a".repeat(40);
+const EXPECTED_LS_REFS_BODY = "0014command=ls-refs\n0001001aref-prefix refs/tags/\n0000";
+
+function pktLine(text) {
+  const byteLen = UTF8_ENCODER.encode(text).length;
+  const lenHex = (byteLen + 4).toString(16).padStart(4, "0");
+  return `${lenHex}${text}`;
+}
+
+function lsRefsBody(tagNames) {
+  return (
+    tagNames
+      .map((tag) => {
+        const ref = tag.startsWith("refs/") ? tag : `refs/tags/${tag}`;
+        return pktLine(`${FAKE_OID} ${ref}\n`);
+      })
+      .join("") + "0000"
+  );
+}
 
 test("compareVersions - Orders GA and pre-release versions accurately", () => {
   const ordered = [
@@ -39,73 +62,166 @@ test("compareVersions - Orders GA and pre-release versions accurately", () => {
   }
 });
 
-test("parseUpstreamTagsAtom - Parses ordered tag links and rejects invalid XML", () => {
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>Tags from kvrocks</title>
-  <entry>
-    <link rel="alternate" type="text/html" href="https://github.com/apache/kvrocks/releases/tag/v2.17.0"/>
-    <title>2.17.0</title>
-  </entry>
-  <entry>
-    <link type="text/html" href="https://github.com/apache/kvrocks/releases/tag/v2.17.0-rc2" rel="alternate"/>
-    <title>v2.17.0-rc2</title>
-  </entry>
-  <entry>
-    <link rel="alternate" type="text/html" href="https://github.com/apache/kvrocks/releases/tag/v2.17.0-rc1"/>
-    <title>v2.17.0-rc1</title>
-  </entry>
-</feed>`;
+test("parseGitLsRefs - Parses pkt-line tag refs and ignores peeled/non-tag lines", () => {
+  const body =
+    "0001" +
+    pktLine(`${FAKE_OID} refs/tags/v2.13.0\n`) +
+    pktLine(`${FAKE_OID} refs/tags/v2.17.0-rc1^{}\n`) +
+    pktLine(`${FAKE_OID} refs/tags/v2.17.0\r\n`) +
+    pktLine(`${FAKE_OID} refs/tags/v2.18.0-测试 peeled:${FAKE_OID}\n`) +
+    pktLine(`${FAKE_OID} refs/heads/main\n`) +
+    "0000";
 
-  assert.deepEqual(parseUpstreamTagsAtom(xml), [
+  const expected = [
+    { name: "v2.13.0" },
     { name: "v2.17.0" },
-    { name: "v2.17.0-rc2" },
-    { name: "v2.17.0-rc1" },
+    { name: "v2.18.0-测试" },
+  ];
+
+  assert.deepEqual(parseGitLsRefs(body), expected);
+  const bytes = UTF8_ENCODER.encode(body);
+  assert.deepEqual(parseGitLsRefs(bytes), expected);
+  assert.deepEqual(parseGitLsRefs(bytes.buffer), expected);
+
+  // Empty flush packet and 0002 response-end packet are both valid terminators
+  assert.deepEqual(parseGitLsRefs("0000"), []);
+  assert.deepEqual(parseGitLsRefs("00000002"), []);
+  assert.deepEqual(parseGitLsRefs(pktLine(`${FAKE_OID} refs/tags/v2.17.0\n`) + "0002"), [
+    { name: "v2.17.0" },
   ]);
-  assert.deepEqual(parseUpstreamTagsAtom(`<feed xmlns="http://www.w3.org/2005/Atom"></feed>`), []);
-  assert.throws(() => parseUpstreamTagsAtom("<html>Error</html>"), /invalid Atom XML/);
-  assert.throws(() => parseUpstreamTagsAtom(""), /invalid Atom XML/);
 });
 
-test("selectPendingReleaseVersions - Returns empty when published releases are up to date", () => {
+test("parseGitLsRefs - Rejects invalid, truncated, HTML, or ERR pkt-line payloads", () => {
+  for (const bad of [
+    "",
+    "<html>Error</html>",
+    "000",
+    "zzzz0000",
+    "0003",
+    "0000<html>trailing</html>",
+    pktLine(`${FAKE_OID} refs/tags/v2.17.0\n`), // missing 0000/0002 terminator
+    `00ff${FAKE_OID} refs/tags/v2.17.0\n0000`, // truncated packet length
+    null,
+    123,
+  ]) {
+    assert.throws(() => parseGitLsRefs(bad), /invalid pkt-line response/);
+  }
+
+  assert.throws(
+    () => parseGitLsRefs(pktLine("ERR unknown command\n") + "0000"),
+    /Git ls-refs error: unknown command/
+  );
+});
+
+test("selectPendingReleaseVersions - Returns empty when published tags are up to date", () => {
   const upstream = [
-    { name: "v2.17.0" },
-    { name: "v2.17.0-rc2" },
+    { name: "v2.13.0" },
     { name: "v2.17.0-rc1" },
+    { name: "v2.17.0-rc2" },
+    { name: "v2.17.0" },
+  ];
+  const packaged = [
+    { name: "v2.13.0-1" },
+    { name: "v2.17.0-1" },
+  ];
+
+  assert.deepEqual(selectPendingReleaseVersions(upstream, packaged, []), []);
+  assert.deepEqual(selectPendingReleaseVersions([], packaged, []), []);
+});
+
+test("selectPendingReleaseVersions - Filters by MIN_VERSION and validates options", () => {
+  assert.equal(DEFAULT_MIN_VERSION, "2.13.0");
+  assert.equal(DEFAULT_MAX_ATTEMPTS, 3);
+
+  const upstream = [
+    { name: "v1.0.0" },
+    { name: "v.1.1.2" },
+    { name: "v2.12.0" },
+    { name: "v2.13.0-rc1" },
+    { name: "v2.13.0" },
+    { name: "v2.14.0" },
+  ];
+
+  // Default MIN_VERSION (2.13.0) excludes v1.0.0, v2.12.0, and v2.13.0-rc1
+  assert.deepEqual(selectPendingReleaseVersions(upstream, [], []), ["2.13.0"]);
+
+  // Custom minVersion (with and without leading "v")
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstream, [], [], { minVersion: "v2.14.0" }),
+    ["2.14.0"]
+  );
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstream, [{ name: "v2.14.0-1" }], [], { minVersion: "2.12.0" }),
+    ["2.12.0"]
+  );
+  // Empty/whitespace options fall back to defaults
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstream, [{ name: "v2.13.0-1" }], [], {
+      minVersion: "  ",
+      maxAttempts: "",
+    }),
+    ["2.14.0"]
+  );
+
+  // Invalid options fail fast
+  for (const minVersion of ["bad", "2.13", "2.13.0-rc_1"]) {
+    assert.throws(
+      () => selectPendingReleaseVersions(upstream, [], [], { minVersion }),
+      /Gateway Misconfiguration: MIN_VERSION/
+    );
+  }
+  for (const maxAttempts of ["0", "-1", "1.5", "abc", 0]) {
+    assert.throws(
+      () => selectPendingReleaseVersions(upstream, [], [], { maxAttempts }),
+      /Gateway Misconfiguration: MAX_ATTEMPTS/
+    );
+  }
+});
+
+test("selectPendingReleaseVersions - Brand-new repo dispatches oldest missing GA sequentially and skips superseded historical RCs", () => {
+  const upstream = [
+    { name: "v2.12.0" },
+    { name: "v2.13.0-rc1" },
+    { name: "v2.13.0" },
+    { name: "v2.14.0-rc1" },
+    { name: "v2.14.0" },
+    { name: "v2.15.0-rc1" },
+    { name: "v2.15.0" },
+    { name: "v2.16.0-rc1" },
     { name: "v2.16.0" },
-  ];
-  const releases = [
-    { tag_name: "v2.17.0-1", draft: false },
-    { tag_name: "v2.16.0-1", draft: false },
+    { name: "v2.17.0-rc1" },
+    { name: "v2.17.0-rc2" },
+    { name: "v2.17.0" },
+    { name: "v2.18.0-rc1" },
   ];
 
-  assert.deepEqual(selectPendingReleaseVersions(upstream, releases, []), []);
+  // Progresses strictly one version per tick in ascending order, skipping superseded RCs
+  const expectedSequence = ["2.13.0", "2.14.0", "2.15.0", "2.16.0", "2.17.0", "2.18.0-rc1"];
+  const packaged = [];
+
+  for (const next of expectedSequence) {
+    assert.deepEqual(selectPendingReleaseVersions(upstream, packaged, []), [next]);
+    packaged.push({ name: `v${next}-1` });
+  }
+
+  assert.deepEqual(selectPendingReleaseVersions(upstream, packaged, []), []);
 });
 
-test("selectPendingReleaseVersions - Ignores draft releases when determining baseline", () => {
-  const upstream = [{ name: "v2.18.0-rc1" }, { name: "v2.17.0" }];
-  const releases = [
-    { tag_name: "v2.18.0-rc1-1", draft: true },
-    { tag_name: "v2.17.0-1", draft: false },
-  ];
-
-  assert.deepEqual(selectPendingReleaseVersions(upstream, releases, []), ["2.18.0-rc1"]);
-});
-
-test("selectPendingReleaseVersions - Tracks RCs sequentially through GA", () => {
-  const releases217 = [{ tag_name: "v2.17.0-1", draft: false }];
+test("selectPendingReleaseVersions - Tracks active RCs sequentially through GA (Strategy A)", () => {
+  const basePackaged = [{ name: "v2.17.0-1" }];
+  const baseUpstream = [{ name: "v2.17.0" }];
 
   // New RC after 2.17.0 GA
   assert.deepEqual(
-    selectPendingReleaseVersions([{ name: "v2.18.0-rc1" }, { name: "v2.17.0" }], releases217, []),
+    selectPendingReleaseVersions([...baseUpstream, { name: "v2.18.0-rc1" }], basePackaged, []),
     ["2.18.0-rc1"]
   );
 
   // Next RC after rc1 is published
   assert.deepEqual(
     selectPendingReleaseVersions(
-      [{ name: "v2.18.0-rc2" }, { name: "v2.18.0-rc1" }, { name: "v2.17.0" }],
-      [{ tag_name: "v2.18.0-rc1-1", draft: false }, ...releases217],
+      [...baseUpstream, { name: "v2.18.0-rc1" }, { name: "v2.18.0-rc2" }],
+      [...basePackaged, { name: "v2.18.0-rc1-1" }],
       []
     ),
     ["2.18.0-rc2"]
@@ -114,197 +230,209 @@ test("selectPendingReleaseVersions - Tracks RCs sequentially through GA", () => 
   // Final GA after rc2 is published
   assert.deepEqual(
     selectPendingReleaseVersions(
-      [{ name: "v2.18.0" }, { name: "v2.18.0-rc2" }, { name: "v2.18.0-rc1" }, { name: "v2.17.0" }],
-      [
-        { tag_name: "v2.18.0-rc2-1", draft: false },
-        { tag_name: "v2.18.0-rc1-1", draft: false },
-        ...releases217,
-      ],
+      [...baseUpstream, { name: "v2.18.0-rc1" }, { name: "v2.18.0-rc2" }, { name: "v2.18.0" }],
+      [...basePackaged, { name: "v2.18.0-rc1-1" }, { name: "v2.18.0-rc2-1" }],
+      []
+    ),
+    ["2.18.0"]
+  );
+
+  // If rc1, rc2, and GA all exist before packaging, superseded RCs are dropped
+  assert.deepEqual(
+    selectPendingReleaseVersions(
+      [...baseUpstream, { name: "v2.18.0-rc1" }, { name: "v2.18.0-rc2" }, { name: "v2.18.0" }],
+      basePackaged,
       []
     ),
     ["2.18.0"]
   );
 });
 
-test("selectPendingReleaseVersions - Skips superseded RCs while queueing distinct versions in ascending order", () => {
-  const releases = [{ tag_name: "v2.17.0-1", draft: false }];
+test("selectPendingReleaseVersions - Dispatches maintenance branch RCs and GAs >= MIN_VERSION in ascending order", () => {
+  const upstream = [
+    { name: "v2.12.1" },
+    { name: "v2.13.0" },
+    { name: "v2.14.0" },
+    { name: "v2.14.1-rc1" },
+    { name: "v2.18.0" },
+    { name: "v2.18.1-rc1" },
+  ];
+  const packaged = [
+    { name: "v2.13.0-1" },
+    { name: "v2.14.0-1" },
+    { name: "v2.18.0-1" },
+  ];
 
-  // Same major.minor.patch: superseded rc1 and rc2 are dropped in favor of GA 2.18.0
+  // Maintenance RC 2.14.1-rc1 comes before 2.18.1-rc1
+  assert.deepEqual(selectPendingReleaseVersions(upstream, packaged, []), ["2.14.1-rc1"]);
+
+  // Once 2.14.1 GA lands, 2.14.1-rc1 is superseded and 2.14.1 is dispatched before 2.18.1-rc1
   assert.deepEqual(
-    selectPendingReleaseVersions(
-      [{ name: "v2.18.0" }, { name: "v2.18.0-rc2" }, { name: "v2.18.0-rc1" }, { name: "v2.17.0" }],
-      releases,
-      []
-    ),
-    ["2.18.0"]
+    selectPendingReleaseVersions([...upstream, { name: "v2.14.1" }], packaged, []),
+    ["2.14.1"]
   );
 
-  // Distinct new versions: both 2.17.1 and 2.18.0-rc1 are queued oldest-to-newest
+  // After 2.14.1 is packaged, advances to 2.18.1-rc1
   assert.deepEqual(
     selectPendingReleaseVersions(
-      [
-        { name: "v2.18.0-rc1" },
-        { name: "v2.17.1" },
-        { name: "v2.17.1-rc1" },
-        { name: "v2.17.0" },
-      ],
-      releases,
+      [...upstream, { name: "v2.14.1" }],
+      [...packaged, { name: "v2.14.1-1" }],
       []
     ),
-    ["2.17.1", "2.18.0-rc1"]
+    ["2.18.1-rc1"]
   );
 });
 
-test("selectPendingReleaseVersions - Respects workflow runs (failed, active, unknown active, dry-run)", () => {
-  const upstream = [{ name: "v2.18.0-rc1" }, { name: "v2.17.0" }];
-  const releases = [{ tag_name: "v2.17.0-1", draft: false }];
+test("selectPendingReleaseVersions - Enforces strict single-flight active run guard while ignoring dry-runs", () => {
+  const upstream = [{ name: "v2.13.0" }, { name: "v2.14.0" }];
 
-  // Completed (even failed) non-dry-run suppresses duplicate dispatch for manual intervention
-  const failedRun = [{ status: "completed", conclusion: "failure", display_title: "Release v2.18.0-rc1-1" }];
-  assert.deepEqual(selectPendingReleaseVersions(upstream, releases, failedRun), []);
-
-  // Advances once upstream publishes a newer version after a failed RC run
-  assert.deepEqual(
-    selectPendingReleaseVersions([{ name: "v2.18.0-rc2" }, ...upstream], releases, failedRun),
-    ["2.18.0-rc2"]
-  );
-
-  // Active known run prevents re-dispatching itself while allowing newer versions to queue
-  for (const status of ["in_progress", "queued"]) {
+  for (const status of ["in_progress", "queued", "waiting"]) {
     assert.deepEqual(
-      selectPendingReleaseVersions(upstream, releases, [
-        { status, display_title: "Release v2.18.0-rc1-1" },
+      selectPendingReleaseVersions(upstream, [], [
+        { status, display_title: "Release v2.13.0-1" },
       ]),
       []
     );
     assert.deepEqual(
-      selectPendingReleaseVersions([{ name: "v2.18.0" }, ...upstream], releases, [
-        { status, display_title: "Release v2.18.0-rc1-1" },
+      selectPendingReleaseVersions(upstream, [], [
+        { status, display_title: "Release Packages" },
       ]),
-      ["2.18.0"]
+      []
     );
   }
 
-  // Active run without version in display_title blocks conservatively
+  // Dry-run workflows (active or completed) never block or count toward attempts
   assert.deepEqual(
-    selectPendingReleaseVersions(upstream, releases, [
-      { status: "in_progress", display_title: "Release Packages" },
+    selectPendingReleaseVersions(upstream, [], [
+      { status: "in_progress", display_title: "Release v2.13.0-1 (dry-run)" },
+      { status: "completed", conclusion: "failure", display_title: "Release v2.13.0-1 (dry-run)" },
+      { status: "completed", conclusion: "failure", display_title: "Release v2.13.0-1 (dry-run)" },
+      { status: "completed", conclusion: "failure", display_title: "Release v2.13.0-1 (dry-run)" },
+    ]),
+    ["2.13.0"]
+  );
+});
+
+test("selectPendingReleaseVersions - Retries head up to MAX_ATTEMPTS then halts globally without skipping", () => {
+  const upstream = [{ name: "v2.13.0" }, { name: "v2.14.0" }];
+  const failed213 = { status: "completed", conclusion: "failure", display_title: "Release v2.13.0-1" };
+
+  // Attempts 0, 1, 2 -> keeps retrying 2.13.0
+  assert.deepEqual(selectPendingReleaseVersions(upstream, [], []), ["2.13.0"]);
+  assert.deepEqual(selectPendingReleaseVersions(upstream, [], [failed213]), ["2.13.0"]);
+  assert.deepEqual(selectPendingReleaseVersions(upstream, [], [failed213, failed213]), ["2.13.0"]);
+
+  // Attempt 3 -> halts globally (does NOT skip 2.13.0 to dispatch 2.14.0)
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstream, [], [failed213, failed213, failed213]),
+    []
+  );
+
+  // An unrelated manual succeeded run does not reset head's attempt count
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstream, [], [
+      { status: "completed", conclusion: "success", display_title: "Release v2.12.0-2" },
+      failed213,
+      failed213,
+      failed213,
     ]),
     []
   );
 
-  // Dry-run workflows (active or completed) never block real release dispatches
+  // Manual fix & release of v2.13.0-1 unblocks queue at 2.14.0
   assert.deepEqual(
-    selectPendingReleaseVersions(upstream, releases, [
-      { status: "in_progress", display_title: "Release v2.18.0-rc1-1 (dry-run)" },
-      { status: "completed", conclusion: "success", display_title: "Release v2.18.0-rc1-1 (dry-run)" },
-    ]),
-    ["2.18.0-rc1"]
+    selectPendingReleaseVersions(
+      upstream,
+      [{ name: "v2.13.0-1" }],
+      [failed213, failed213, failed213]
+    ),
+    ["2.14.0"]
   );
-});
 
-test("selectPendingReleaseVersions - Surfaces unrecognized new tags once and ignores historical ones", () => {
-  const releases = [{ tag_name: "v2.17.0-1", draft: false }];
-
-  // Unrecognized tag above baseline is passed through once so release.yaml fails and alerts
-  const upstreamWithBadTag = [
-    { name: "v2.18.0-alpha-1" },
-    { name: "v2.17.0" },
-    { name: "v.1.1.2" },
-  ];
-  assert.deepEqual(selectPendingReleaseVersions(upstreamWithBadTag, releases, []), ["2.18.0-alpha-1"]);
-
-  // Once release.yaml has run (and failed) on that bad tag, do not re-dispatch every hour
-  const failedBadRun = [
-    { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-alpha-1-1" },
-  ];
-  assert.deepEqual(selectPendingReleaseVersions(upstreamWithBadTag, releases, failedBadRun), []);
-
-  // Same for manual dispatches whose input started with `v` (producing `Release vv...`)
-  const failedDoubleVRun = [
-    { status: "completed", conclusion: "failure", display_title: "Release vv2.18.0-alpha-1-1" },
-  ];
-  assert.deepEqual(selectPendingReleaseVersions(upstreamWithBadTag, releases, failedDoubleVRun), []);
-
-  // Historical malformed tags below baseline are ignored
+  // Custom maxAttempts is respected
   assert.deepEqual(
-    selectPendingReleaseVersions([{ name: "v2.17.0" }, { name: "v.1.1.2" }], releases, []),
+    selectPendingReleaseVersions(upstream, [], [failed213], { maxAttempts: 1 }),
     []
   );
-});
-
-test("selectPendingReleaseVersions - Dispatches GA maintenance patches below an RC or newer GA baseline", () => {
-  // Patch 2.17.1 released after 2.18.0-rc1 is already packaged
   assert.deepEqual(
-    selectPendingReleaseVersions(
-      [{ name: "v2.17.1" }, { name: "v2.18.0-rc1" }, { name: "v2.17.0" }],
-      [
-        { tag_name: "v2.18.0-rc1-1", draft: false },
-        { tag_name: "v2.17.0-1", draft: false },
-      ],
-      []
-    ),
-    ["2.17.1"]
+    selectPendingReleaseVersions(upstream, [], [failed213, failed213], { maxAttempts: 2 }),
+    []
+  );
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstream, [], [failed213], { maxAttempts: 2 }),
+    ["2.13.0"]
   );
 
-  // Patch 2.17.1 released after 2.18.0 GA (with 2.17.0 packaged and older untracked 2.16.0 ignored)
+  // Superseded failed RC automatically unblocks when upstream cuts a newer RC
+  const failedRc1 = { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-rc1-1" };
   assert.deepEqual(
     selectPendingReleaseVersions(
-      [{ name: "v2.17.1" }, { name: "v2.18.0" }, { name: "v2.17.0" }, { name: "v2.16.0" }],
-      [
-        { tag_name: "v2.18.0-1", draft: false },
-        { tag_name: "v2.17.0-1", draft: false },
-      ],
-      []
+      [{ name: "v2.17.0" }, { name: "v2.18.0-rc1" }],
+      [{ name: "v2.17.0-1" }],
+      [failedRc1, failedRc1, failedRc1]
     ),
-    ["2.17.1"]
+    []
+  );
+  assert.deepEqual(
+    selectPendingReleaseVersions(
+      [{ name: "v2.17.0" }, { name: "v2.18.0-rc1" }, { name: "v2.18.0-rc2" }],
+      [{ name: "v2.17.0-1" }],
+      [failedRc1, failedRc1, failedRc1]
+    ),
+    ["2.18.0-rc2"]
   );
 });
 
-test("selectPendingReleaseVersions - Brand-new repo dispatches newest GA and newest RC if RC is ahead", () => {
+test("selectPendingReleaseVersions - Surfaces unrecognized >= MIN_VERSION tags once without blocking valid releases", () => {
+  // Valid pending versions are never blocked by malformed tags (including on brand-new repos)
   assert.deepEqual(
     selectPendingReleaseVersions(
-      [{ name: "v2.17.0" }, { name: "v2.17.0-rc2" }, { name: "v2.16.0" }],
+      [{ name: "v2.18.0-alpha-1" }, { name: "v2.17.0" }],
       [],
       []
     ),
     ["2.17.0"]
   );
 
-  // When newest upstream tag is an RC, bootstrap stable with newest GA before the RC
+  // Once all valid versions are packaged, unrecognized >= MIN_VERSION tag is surfaced once
+  const upstreamWithBadTag = [
+    { name: "v2.17.0" },
+    { name: "v2.18.0-alpha-1" },
+    { name: "v2.12.0-alpha-1" },
+    { name: "v.1.1.2" },
+    { name: "nightly" },
+  ];
+  const packaged217 = [{ name: "v2.17.0-1" }];
   assert.deepEqual(
-    selectPendingReleaseVersions(
-      [{ name: "v2.18.0-rc1" }, { name: "v2.17.0" }, { name: "v2.16.0" }],
-      [],
-      []
-    ),
-    ["2.17.0", "2.18.0-rc1"]
-  );
-
-  // If newest upstream tag in a brand-new repo is malformed, dispatch it once
-  assert.deepEqual(
-    selectPendingReleaseVersions([{ name: "v2.18.0-alpha-1" }, { name: "v2.17.0" }], [], []),
+    selectPendingReleaseVersions(upstreamWithBadTag, packaged217, []),
     ["2.18.0-alpha-1"]
   );
+
+  // Never retried once a non-dry-run workflow run has occurred (even with double "v")
   assert.deepEqual(
-    selectPendingReleaseVersions([{ name: "v2.18.0-alpha-1" }, { name: "v2.17.0" }], [], [
+    selectPendingReleaseVersions(upstreamWithBadTag, packaged217, [
       { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-alpha-1-1" },
     ]),
     []
   );
-});
+  assert.deepEqual(
+    selectPendingReleaseVersions(upstreamWithBadTag, packaged217, [
+      { status: "completed", conclusion: "failure", display_title: "Release vv2.18.0-alpha-1-1" },
+    ]),
+    []
+  );
 
-function atomFeed(tagNames) {
-  const entries = tagNames
-    .map(
-      (tag) => `  <entry>
-    <link rel="alternate" type="text/html" href="https://github.com/apache/kvrocks/releases/tag/${tag}"/>
-    <title>${tag}</title>
-  </entry>`
-    )
-    .join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<feed xmlns="http://www.w3.org/2005/Atom">\n${entries}\n</feed>`;
-}
+  // Malformed tags are NOT dispatched while a valid head version is halted at maxAttempts
+  const failed217 = { status: "completed", conclusion: "failure", display_title: "Release v2.17.0-1" };
+  assert.deepEqual(
+    selectPendingReleaseVersions(
+      [{ name: "v2.17.0" }, { name: "v2.18.0-alpha-1" }],
+      [],
+      [failed217, failed217, failed217]
+    ),
+    []
+  );
+});
 
 async function runScheduled({ env = SCHEDULE_ENV, fetchImpl } = {}) {
   const originalFetch = globalThis.fetch;
@@ -324,104 +452,178 @@ async function runScheduled({ env = SCHEDULE_ENV, fetchImpl } = {}) {
   }
 }
 
-test("worker.scheduled - Throws descriptive error when GITHUB_REPO or GITHUB_TOKEN is missing", async () => {
+test("worker.scheduled - Throws descriptive error on missing or invalid configuration", async () => {
+  const neverFetch = () => {
+    throw new Error("should not call fetch");
+  };
+
   await assert.rejects(
-    runScheduled({
-      env: { GITHUB_TOKEN: "tok" },
-      fetchImpl: () => {
-        throw new Error("should not call fetch");
-      },
-    }),
+    runScheduled({ env: { GITHUB_TOKEN: "tok" }, fetchImpl: neverFetch }),
     /Gateway Misconfiguration: GITHUB_REPO \(owner\/repo\) must be configured\./
   );
 
   for (const env of [{ GITHUB_REPO: TEST_REPO }, { GITHUB_REPO: TEST_REPO, GITHUB_TOKEN: "" }]) {
     await assert.rejects(
-      runScheduled({
-        env,
-        fetchImpl: () => {
-          throw new Error("should not call fetch");
-        },
-      }),
+      runScheduled({ env, fetchImpl: neverFetch }),
       /Gateway Misconfiguration: GITHUB_TOKEN secret must be configured\./
     );
   }
+
+  await assert.rejects(
+    runScheduled({ env: { ...SCHEDULE_ENV, MIN_VERSION: "bad" }, fetchImpl: neverFetch }),
+    /Gateway Misconfiguration: MIN_VERSION/
+  );
+  await assert.rejects(
+    runScheduled({ env: { ...SCHEDULE_ENV, MAX_ATTEMPTS: "0" }, fetchImpl: neverFetch }),
+    /Gateway Misconfiguration: MAX_ATTEMPTS/
+  );
 });
 
-test("worker.scheduled - Queries tags.atom (unauthenticated) + GitHub API and queues pending releases in order", async () => {
+test("worker.scheduled - Queries Git ls-refs + workflow runs and dispatches single oldest pending release", async () => {
+  const expectedBasicAuth = `Basic ${btoa("x-access-token:ghp_test_token_123")}`;
+
   const { result, fetchCalls } = await runScheduled({
     fetchImpl: (url, init) => {
-      if (url === "https://github.com/apache/kvrocks/tags.atom") {
+      if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+        assert.equal(init.method, "POST");
+        assert.equal(init.headers["Git-Protocol"], "version=2");
+        assert.equal(init.headers["Content-Type"], "application/x-git-upload-pack-request");
         assert.equal(init.headers.Authorization, undefined);
-        return new Response(atomFeed(["v2.18.0-rc1", "v2.17.1", "v2.17.0"]));
+        assert.equal(init.body, EXPECTED_LS_REFS_BODY);
+        return new Response(
+          lsRefsBody(["v2.12.0", "v2.13.0", "v2.14.0-rc1", "v2.14.0", "v2.15.0-rc1"])
+        );
       }
-      if (url === `https://api.github.com/repos/${TEST_REPO}/releases?per_page=15`) {
-        return Response.json([{ tag_name: "v2.17.0-1", draft: false }]);
+      if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+        assert.equal(init.method, "POST");
+        assert.equal(init.headers["Git-Protocol"], "version=2");
+        assert.equal(init.headers["Content-Type"], "application/x-git-upload-pack-request");
+        assert.equal(init.headers.Authorization, expectedBasicAuth);
+        assert.equal(init.body, EXPECTED_LS_REFS_BODY);
+        return new Response(lsRefsBody(["v2.13.0-1"]));
       }
       if (
         url ===
         `https://api.github.com/repos/${TEST_REPO}/actions/workflows/release.yaml/runs?event=workflow_dispatch&per_page=100`
       ) {
+        assert.equal(init.headers.Authorization, "Bearer ghp_test_token_123");
+        assert.equal(init.headers.Accept, "application/vnd.github+json");
         return Response.json({ workflow_runs: [] });
       }
       if (
         url === `https://api.github.com/repos/${TEST_REPO}/actions/workflows/release.yaml/dispatches` &&
         init?.method === "POST"
       ) {
+        assert.equal(init.headers.Authorization, "Bearer ghp_test_token_123");
         return new Response(null, { status: 204 });
       }
       return new Response("Unexpected request", { status: 500 });
     },
   });
 
-  assert.deepEqual(result, { dispatched: true, versions: ["2.17.1", "2.18.0-rc1"] });
-  assert.equal(fetchCalls.length, 5);
-
-  // API calls to the target repository carry the Bearer token; upstream tags.atom does not
-  for (const call of fetchCalls.slice(1)) {
-    assert.equal(call.init.headers.Authorization, "Bearer ghp_test_token_123");
-    assert.equal(call.init.headers.Accept, "application/vnd.github+json");
-  }
-
+  // Dispatches only 2.14.0 (skipping superseded 2.14.0-rc1, holding 2.15.0-rc1 for next tick)
+  assert.deepEqual(result, { dispatched: true, versions: ["2.14.0"] });
+  assert.equal(fetchCalls.length, 4);
   assert.deepEqual(JSON.parse(fetchCalls[3].init.body), {
     ref: "main",
-    inputs: { version: "2.17.1", iteration: "1" },
-  });
-  assert.deepEqual(JSON.parse(fetchCalls[4].init.body), {
-    ref: "main",
-    inputs: { version: "2.18.0-rc1", iteration: "1" },
+    inputs: { version: "2.14.0", iteration: "1" },
   });
 });
 
-test("worker.scheduled - Makes no POST dispatch when up to date", async () => {
+test("worker.scheduled - Respects custom UPSTREAM_REPO, RELEASE_REF, MIN_VERSION, and MAX_ATTEMPTS", async () => {
   const { result, fetchCalls } = await runScheduled({
-    fetchImpl: (url) => {
-      if (url === "https://github.com/apache/kvrocks/tags.atom") {
-        return new Response(atomFeed(["v2.17.0", "v2.17.0-rc2"]));
+    env: {
+      ...SCHEDULE_ENV,
+      UPSTREAM_REPO: "custom-org/kvrocks-fork",
+      RELEASE_REF: "release-branch",
+      MIN_VERSION: "v2.15.0",
+      MAX_ATTEMPTS: "2",
+    },
+    fetchImpl: (url, init) => {
+      if (url === "https://github.com/custom-org/kvrocks-fork.git/git-upload-pack") {
+        return new Response(lsRefsBody(["v2.14.0", "v2.15.0", "v2.16.0"]));
       }
-      if (url.includes("/releases?per_page=15")) {
-        return Response.json([{ tag_name: "v2.17.0-1", draft: false }]);
+      if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+        return new Response("0000");
+      }
+      if (url.includes("/actions/workflows/release.yaml/runs")) {
+        return Response.json({
+          workflow_runs: [
+            { status: "completed", conclusion: "failure", display_title: "Release v2.15.0-1" },
+          ],
+        });
+      }
+      if (url.endsWith("/dispatches") && init?.method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      return new Response("Unexpected request", { status: 500 });
+    },
+  });
+
+  assert.deepEqual(result, { dispatched: true, versions: ["2.15.0"] });
+  assert.deepEqual(JSON.parse(fetchCalls[3].init.body), {
+    ref: "release-branch",
+    inputs: { version: "2.15.0", iteration: "1" },
+  });
+});
+
+test("worker.scheduled - Makes no POST dispatch when up to date or halted at MAX_ATTEMPTS", async () => {
+  const upToDate = await runScheduled({
+    fetchImpl: (url) => {
+      if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+        return new Response(lsRefsBody(["v2.17.0", "v2.17.0-rc2"]));
+      }
+      if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+        return new Response(lsRefsBody(["v2.17.0-1"]));
       }
       return Response.json({ workflow_runs: [] });
     },
   });
 
-  assert.deepEqual(result, { dispatched: false, versions: [] });
-  assert.equal(fetchCalls.length, 3);
+  assert.deepEqual(upToDate.result, { dispatched: false, versions: [] });
+  assert.equal(upToDate.fetchCalls.length, 3);
   assert.equal(
-    fetchCalls.some((c) => c.init?.method === "POST"),
+    upToDate.fetchCalls.some((c) => c.init?.method === "POST" && c.url.endsWith("/dispatches")),
+    false
+  );
+
+  const halted = await runScheduled({
+    fetchImpl: (url) => {
+      if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+        return new Response(lsRefsBody(["v2.17.0", "v2.18.0"]));
+      }
+      if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+        return new Response(lsRefsBody(["v2.17.0-1"]));
+      }
+      return Response.json({
+        workflow_runs: [
+          { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-1" },
+          { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-1" },
+          { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-1" },
+        ],
+      });
+    },
+  });
+
+  assert.deepEqual(halted.result, { dispatched: false, versions: [] });
+  assert.equal(halted.fetchCalls.length, 3);
+  assert.equal(
+    halted.fetchCalls.some((c) => c.init?.method === "POST" && c.url.endsWith("/dispatches")),
     false
   );
 });
 
-test("worker.scheduled - Rejects on GitHub error, invalid feed XML, or network error", async () => {
+test("worker.scheduled - Rejects on GitHub HTTP error, invalid pkt-line response, or network error", async () => {
   await assert.rejects(
     runScheduled({
       fetchImpl: (url) => {
-        if (url === "https://github.com/apache/kvrocks/tags.atom") {
+        if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
           return new Response("rate limited", { status: 429, statusText: "Too Many Requests" });
         }
-        return Response.json([]);
+        if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+          return new Response("0000");
+        }
+        return Response.json({ workflow_runs: [] });
       },
     }),
     /GitHub API error \(upstream tags, 429\): Too Many Requests/
@@ -430,14 +632,16 @@ test("worker.scheduled - Rejects on GitHub error, invalid feed XML, or network e
   await assert.rejects(
     runScheduled({
       fetchImpl: (url) => {
-        if (url === "https://github.com/apache/kvrocks/tags.atom") {
-          return new Response("<html>not atom</html>");
+        if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+          return new Response("<html>not pkt-line</html>");
         }
-        if (url.includes("/releases?")) return Response.json([]);
+        if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+          return new Response("0000");
+        }
         return Response.json({ workflow_runs: [] });
       },
     }),
-    /invalid Atom XML/
+    /invalid pkt-line response/
   );
 
   await assert.rejects(
