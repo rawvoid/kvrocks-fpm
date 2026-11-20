@@ -165,7 +165,7 @@ The active configuration file `/etc/kvrocks/kvrocks.conf` is marked as a protect
 
 ## 🛠️ Build & Release
 
-Packages are built and published on-demand via GitHub Actions (`workflow_dispatch`):
+New upstream Apache Kvrocks tags (both GA releases and `-rc` pre-releases) are automatically detected and dispatched hourly by the Edge Gateway Worker's Cron Trigger when the `GITHUB_TOKEN` Worker secret is configured (see [gateway/README.md](gateway/README.md)). You can also build and publish on-demand via GitHub Actions (`workflow_dispatch`):
 
 * **GitHub Web UI**: Go to **Actions** -> **Release Packages** -> **Run workflow**, enter `version` (e.g. `2.15.0`) and `iteration` (e.g. `1`); tick `dry_run` to build packages and merge indexes without publishing.
 * **GitHub CLI (`gh`)**:

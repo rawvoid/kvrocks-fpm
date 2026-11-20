@@ -67,6 +67,14 @@ without invoking the Worker**, everything else reaches `src/index.js`.
    - Only `GET`/`HEAD` are served, and client headers/query strings are never forwarded upstream, so
      caches cannot be fragmented or busted.
 
+4. **Automated upstream release watcher**
+   - `wrangler.toml` configures an hourly Cron Trigger (`[triggers] crons = ["0 * * * *"]`) invoking
+     the Worker's `scheduled` handler.
+   - On each tick, it reads the latest 10 tags from `apache/kvrocks` (`tags.atom`, unauthenticated),
+     compares them against published GitHub Releases and recent `release.yaml` workflow runs in
+     `GITHUB_REPO`, and queues any newer versions (both GA and `-rc` pre-releases) via
+     `workflow_dispatch` in ascending order.
+
 ---
 
 ## 🚀 Deployment
@@ -85,6 +93,15 @@ Configure once, as repository secrets:
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | Deploying the Worker (Workers Scripts: Edit) |
 | `CLOUDFLARE_ACCOUNT_ID` | Targeting the account |
+
+Configure `GITHUB_TOKEN` as a Worker secret (required by the Cron Trigger; missing `GITHUB_TOKEN` or
+`GITHUB_REPO` fails the Cron execution explicitly in Cloudflare logs). Use a Fine-grained PAT scoped
+to this repository only, with `Actions: Read and write` and `Contents: Read` (`wrangler deploy`
+preserves existing Worker secrets across deploys):
+
+```bash
+npx --yes wrangler@4 secret put GITHUB_TOKEN
+```
 
 ### From your workstation
 

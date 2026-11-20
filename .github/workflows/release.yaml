@@ -1,4 +1,5 @@
 name: Release Packages
+run-name: Release v${{ inputs.version }}-${{ inputs.iteration }}${{ inputs.dry_run && ' (dry-run)' || '' }}
 
 permissions:
   contents: read

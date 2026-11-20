@@ -12,3 +12,7 @@ compatibility_flags = ["nodejs_compat"]
 # served straight from the edge. Static assets come before the Worker script, so a request only reaches
 # `src/index.js` when no asset matches — i.e. for packages and repository metadata.
 directory = "./dist"
+
+[triggers]
+# Hourly check for new upstream Apache Kvrocks tags (GA and pre-release) to dispatch release.yaml.
+crons = ["0 * * * *"]
