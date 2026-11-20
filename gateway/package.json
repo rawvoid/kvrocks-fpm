@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/render.mjs",
-    "test": "node --test test/worker.test.js",
+    "test": "node --test test/*.test.js",
     "dev": "node scripts/render.mjs && npx --yes wrangler@4 dev",
     "deploy": "node scripts/deploy.mjs"
   },

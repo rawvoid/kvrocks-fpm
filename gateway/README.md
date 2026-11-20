@@ -13,7 +13,12 @@ supplied at build and deploy time, so a fork works without editing a single file
 ```
 gateway/
 ├── wrangler.toml        # routes + the static asset directory
-├── src/index.js         # the Worker
+├── src/
+│   ├── index.js         # Worker entrypoint ({ fetch, scheduled })
+│   ├── packages.js      # /pool/*.deb & /rpm/**.rpm release proxy + edge cache
+│   ├── metadata.js      # GitHub Pages metadata proxy + TTL/304 handling
+│   ├── watcher.js       # Cron upstream tag watcher & workflow_dispatch
+│   └── shared.js        # shared HTTP response & fetch helpers
 ├── test/                # node:test unit tests
 ├── scripts/render.mjs   # public/ -> dist/, resolving both placeholders
 ├── scripts/deploy.mjs   # render + wrangler deploy, passing the slug as --var
