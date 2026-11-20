@@ -234,7 +234,7 @@ export function parseGitLsRefs(input) {
  * @param {{minVersion?: string, maxAttempts?: number|string}} [options={}] Watcher thresholds
  * @returns {string[]} Zero or one version to dispatch (without leading "v")
  */
-export function selectPendingReleaseVersions(
+function evaluatePendingRelease(
   upstreamTags,
   packagedTags,
   workflowRuns = [],
@@ -243,17 +243,46 @@ export function selectPendingReleaseVersions(
   const minVersion = normalizeMinVersion(options?.minVersion);
   const maxAttempts = normalizeMaxAttempts(options?.maxAttempts);
 
+  const invalidTags = [];
+  const seenInvalid = new Set();
+  if (Array.isArray(upstreamTags)) {
+    for (const item of upstreamTags) {
+      const rawName = String(getTagText(item) ?? "").replace(/^refs\/tags\//, "");
+      if (!rawName || UPSTREAM_TAG_RE.test(rawName)) continue;
+
+      const looseMatch = rawName.match(LOOSE_UPSTREAM_TAG_RE);
+      if (!looseMatch || compareVersions(looseMatch[1], minVersion) < 0) continue;
+
+      const raw = rawName.replace(/^v/, "");
+      if (raw && !seenInvalid.has(raw)) {
+        seenInvalid.add(raw);
+        invalidTags.push({ base: looseMatch[1], raw });
+      }
+    }
+    invalidTags.sort(
+      (a, b) => compareVersions(a.base, b.base) || a.raw.localeCompare(b.raw)
+    );
+  }
+  const invalidTagNames = invalidTags.map((item) => item.raw);
+
   const runs = Array.isArray(workflowRuns) ? workflowRuns : [];
   const nonDryRuns = runs.filter(
     (run) => !String(run?.display_title ?? "").endsWith("(dry-run)")
   );
 
   // Strict single-flight guard: never queue a second run behind an active release.
-  if (nonDryRuns.some((run) => run?.status && run.status !== "completed")) {
-    return [];
+  const activeRun = nonDryRuns.find((run) => run?.status && run.status !== "completed");
+  if (activeRun) {
+    return {
+      versions: [],
+      invalidTags: invalidTagNames,
+      activeRun: String(activeRun.display_title || activeRun.status),
+    };
   }
 
-  if (!Array.isArray(upstreamTags) || upstreamTags.length === 0) return [];
+  if (!Array.isArray(upstreamTags) || upstreamTags.length === 0) {
+    return { versions: [], invalidTags: invalidTagNames, emptyUpstream: true };
+  }
 
   const nonDraftPackaged = Array.isArray(packagedTags)
     ? packagedTags.filter((item) => typeof item === "string" || !item?.draft)
@@ -285,32 +314,26 @@ export function selectPendingReleaseVersions(
   // repeated failures halt the pipeline instead of skipping ahead out of order.
   if (missingVersions.length > 0) {
     const head = missingVersions[0];
-    return (attemptCounts.get(head) ?? 0) < maxAttempts ? [head] : [];
+    const attempts = attemptCounts.get(head) ?? 0;
+    return attempts < maxAttempts
+      ? { versions: [head], invalidTags: invalidTagNames, head, attempts }
+      : { versions: [], invalidTags: invalidTagNames, halted: true, head, attempts };
   }
 
-  const seenInvalid = new Set();
-  const invalidCandidates = [];
-  for (const item of upstreamTags) {
-    const rawName = String(getTagText(item) ?? "").replace(/^refs\/tags\//, "");
-    if (!rawName || UPSTREAM_TAG_RE.test(rawName)) continue;
+  const nextInvalid = invalidTagNames.find((raw) => !dispatchedRawVersions.has(raw));
+  return {
+    versions: nextInvalid ? [nextInvalid] : [],
+    invalidTags: invalidTagNames,
+  };
+}
 
-    const looseMatch = rawName.match(LOOSE_UPSTREAM_TAG_RE);
-    if (!looseMatch) continue;
-
-    const base = looseMatch[1];
-    if (compareVersions(base, minVersion) < 0) continue;
-
-    const raw = rawName.replace(/^v/, "");
-    if (!raw || dispatchedRawVersions.has(raw) || seenInvalid.has(raw)) continue;
-
-    seenInvalid.add(raw);
-    invalidCandidates.push({ base, raw });
-  }
-
-  invalidCandidates.sort(
-    (a, b) => compareVersions(a.base, b.base) || a.raw.localeCompare(b.raw)
-  );
-  return invalidCandidates.length > 0 ? [invalidCandidates[0].raw] : [];
+export function selectPendingReleaseVersions(
+  upstreamTags,
+  packagedTags,
+  workflowRuns = [],
+  options = {}
+) {
+  return evaluatePendingRelease(upstreamTags, packagedTags, workflowRuns, options).versions;
 }
 
 function githubApiHeaders(token) {
@@ -392,12 +415,23 @@ export async function checkAndDispatchRelease(env) {
     ).then((res) => res.json()),
   ]);
 
-  const versions = selectPendingReleaseVersions(
-    upstreamTags,
-    packagedTags,
-    runsData?.workflow_runs ?? [],
-    { minVersion, maxAttempts }
-  );
+  const { versions, invalidTags, activeRun, emptyUpstream, halted, head, attempts } =
+    evaluatePendingRelease(upstreamTags, packagedTags, runsData?.workflow_runs ?? [], {
+      minVersion,
+      maxAttempts,
+    });
+
+  if (invalidTags.length > 0) {
+    console.warn(JSON.stringify({ event: "watcher.invalid_tags", upstreamRepo, githubRepo, invalidTags }));
+  }
+  if (emptyUpstream) {
+    console.warn(JSON.stringify({ event: "watcher.empty_upstream", upstreamRepo, githubRepo }));
+  }
+  if (halted) {
+    console.error(
+      JSON.stringify({ event: "watcher.halted", upstreamRepo, githubRepo, head, attempts, maxAttempts })
+    );
+  }
 
   for (const version of versions) {
     const dispatchRes = await fetchGitHub(
@@ -414,7 +448,16 @@ export async function checkAndDispatchRelease(env) {
 
   const dispatched = versions.length > 0;
   console.log(
-    JSON.stringify({ event: "watcher", upstreamRepo, githubRepo, minVersion, maxAttempts, dispatched, versions })
+    JSON.stringify({
+      event: "watcher",
+      upstreamRepo,
+      githubRepo,
+      minVersion,
+      maxAttempts,
+      dispatched,
+      versions,
+      ...(activeRun ? { activeRun } : {}),
+    })
   );
   return { dispatched, versions };
 }

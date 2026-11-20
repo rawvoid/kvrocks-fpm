@@ -653,3 +653,65 @@ test("worker.scheduled - Rejects on GitHub HTTP error, invalid pkt-line response
     /GitHub API network error/
   );
 });
+
+test("worker.scheduled - Logs warnings/errors for invalid upstream tags, empty feed, and halted head", async () => {
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const warnings = [];
+  const errors = [];
+  console.warn = (msg) => warnings.push(JSON.parse(msg));
+  console.error = (msg) => errors.push(JSON.parse(msg));
+
+  try {
+    await runScheduled({
+      fetchImpl: (url, init) => {
+        if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+          return new Response(lsRefsBody(["v2.17.0", "v2.18.0-alpha-1"]));
+        }
+        if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+          return new Response("0000");
+        }
+        if (url.endsWith("/dispatches") && init?.method === "POST") {
+          return new Response(null, { status: 204 });
+        }
+        return Response.json({ workflow_runs: [] });
+      },
+    });
+
+    await runScheduled({
+      fetchImpl: (url) => {
+        if (url.endsWith("/git-upload-pack")) return new Response("0000");
+        return Response.json({ workflow_runs: [] });
+      },
+    });
+
+    await runScheduled({
+      fetchImpl: (url) => {
+        if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+          return new Response(lsRefsBody(["v2.17.0"]));
+        }
+        if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+          return new Response("0000");
+        }
+        return Response.json({
+          workflow_runs: Array(3).fill({
+            status: "completed",
+            conclusion: "failure",
+            display_title: "Release v2.17.0-1",
+          }),
+        });
+      },
+    });
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+  }
+
+  assert.deepEqual(
+    warnings.map((w) => w.event),
+    ["watcher.invalid_tags", "watcher.empty_upstream"]
+  );
+  assert.deepEqual(warnings[0].invalidTags, ["2.18.0-alpha-1"]);
+  assert.equal(errors[0].event, "watcher.halted");
+  assert.equal(errors[0].head, "2.17.0");
+});
