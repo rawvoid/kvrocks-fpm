@@ -36,14 +36,12 @@ jobs:
         with:
           node-version: '22'
 
-      # Renders both placeholders from values this run already has (GITHUB_REPOSITORY and the
-      # KVROCKS_GATEWAY_URL variable) and deploys the Worker with the same value it rendered into the
-      # page, so CI and a workstation follow one path. `npm run deploy` passes GITHUB_REPO to wrangler
-      # itself, because `wrangler deploy` does not read `.dev.vars`.
+      # Renders `__GITHUB_REPO__` from GITHUB_REPOSITORY and deploys the Worker, passing the same
+      # slug to wrangler with `--var` (because `wrangler deploy` does not read `.dev.vars`) so CI
+      # and a workstation follow one path.
       - name: Deploy
         working-directory: gateway
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          KVROCKS_GATEWAY_URL: ${{ vars.KVROCKS_GATEWAY_URL }}
         run: npm run deploy

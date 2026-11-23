@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,10 +12,24 @@ import { render } from "../scripts/render.mjs";
 // Test-only generic fixtures to ensure decoupling from production configuration
 const TEST_REPO = "test-owner/test-repo";
 const TEST_METADATA_ORIGIN = "https://test-pages.example.com";
+const PUBLIC_DIR = join(dirname(dirname(fileURLToPath(import.meta.url))), "public");
 const TEST_ENV = {
   GITHUB_REPO: TEST_REPO,
   METADATA_ORIGIN: TEST_METADATA_ORIGIN,
 };
+
+function staticAssets(files = ["install.sh", "kvrocks.repo"]) {
+  const contents = new Map(files.map((name) => [`/${name}`, readFileSync(join(PUBLIC_DIR, name), "utf8")]));
+  return {
+    requests: [],
+    async fetch(request) {
+      this.requests.push(request);
+      const { pathname } = new URL(request.url);
+      const body = contents.get(pathname);
+      return body !== undefined ? new Response(body, { status: 200 }) : new Response("Not Found", { status: 404 });
+    },
+  };
+}
 
 const resolve = (pathname) => resolveReleaseDownloadUrl(pathname, TEST_REPO);
 
@@ -201,7 +214,14 @@ function memoryCache(initial = {}) {
  */
 async function call(
   path,
-  { method = "GET", headers = {}, env = TEST_ENV, upstream = () => new Response("ok"), cache = memoryCache() } = {}
+  {
+    method = "GET",
+    headers = {},
+    origin = "https://kvrocks-repo.example.com",
+    env = { ...TEST_ENV, ASSETS: staticAssets() },
+    upstream = () => new Response("ok"),
+    cache = memoryCache(),
+  } = {}
 ) {
   const originalFetch = globalThis.fetch;
   const originalCaches = globalThis.caches;
@@ -215,7 +235,7 @@ async function call(
   globalThis.caches = { default: cache };
 
   try {
-    const request = new Request(`https://kvrocks-repo.example.com${path}`, { method, headers });
+    const request = new Request(`${origin}${path}`, { method, headers });
     const res = await worker.fetch(request, env, { waitUntil: (promise) => pending.push(promise) });
     await Promise.all(pending);
     return { res, fetchCalls, cache };
@@ -568,15 +588,63 @@ test("worker.fetch - Conditional headers never turn errors into 304", async () =
   assert.equal(res.status, 404);
 });
 
-// --- Static Assets ----------------------------------------------------------
+// --- Request-Origin Templates ----------------------------------------------
 
-test("worker.fetch - Static assets (/install.sh, /kvrocks.repo) are served by the asset layer, never the Worker's business", async () => {
-  // The asset layer answers these paths before the Worker runs; if a request ever reached here it
-  // would be proxied to the metadata origin instead of the deployed copy.
-  for (const path of ["/install.sh", "/kvrocks.repo"]) {
-    const { fetchCalls } = await call(path);
-    assert.equal(fetchCalls[0].url, `${TEST_METADATA_ORIGIN}${path}`);
+test("worker.fetch - Templates (/install.sh, /kvrocks.repo) substitute request origin without touching upstream", async () => {
+  for (const origin of ["https://kvrocks-repo.example.com", "https://mirror.example.org:8443"]) {
+    for (const path of ["/install.sh", "/kvrocks.repo"]) {
+      const assets = staticAssets();
+      const { res, fetchCalls } = await call(`${path}?v=1`, {
+        origin,
+        headers: { "If-None-Match": '"stale-etag"' },
+        env: { ...TEST_ENV, ASSETS: assets },
+      });
+
+      assert.equal(res.status, 200, `${origin}${path}`);
+      assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+      assert.equal(res.headers.get("cache-control"), "public, max-age=0, must-revalidate");
+      assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+      assert.equal(fetchCalls.length, 0);
+      assert.equal(assets.requests.length, 1);
+      assert.equal(assets.requests[0].url, `${origin}${path}`);
+      assert.equal(assets.requests[0].headers.has("if-none-match"), false);
+
+      const text = await res.text();
+      assert.equal(text.includes("__REPO_ORIGIN__"), false, `${origin}${path}`);
+      assert.equal(res.headers.get("content-length"), String(Buffer.byteLength(text, "utf8")));
+      if (path === "/install.sh") {
+        assert.equal(text.includes(`REPO_ORIGIN="${origin}"`), true);
+      } else {
+        assert.equal(text.includes(`baseurl=${origin}/rpm/stable/$basearch/`), true);
+        assert.equal(text.includes(`baseurl=${origin}/rpm/testing/$basearch/`), true);
+        assert.equal(text.includes(`gpgkey=${origin}/kvrocks.asc`), true);
+      }
+    }
   }
+});
+
+test("worker.fetch - Template HEAD requests return no body with exact rendered Content-Length", async () => {
+  const origin = "https://mirror.example.org:8443";
+  for (const path of ["/install.sh", "/kvrocks.repo"]) {
+    const { res: getRes } = await call(path, { origin });
+    const { res: headRes, fetchCalls } = await call(path, { method: "HEAD", origin });
+
+    assert.equal(headRes.status, 200);
+    assert.equal(headRes.body, null);
+    assert.equal(headRes.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(headRes.headers.get("content-length"), getRes.headers.get("content-length"));
+    assert.equal(fetchCalls.length, 0);
+  }
+});
+
+test("worker.fetch - Missing ASSETS binding or missing template returns fail-fast error", async () => {
+  const noAssets = await call("/install.sh", { env: TEST_ENV });
+  assert.equal(noAssets.res.status, 500);
+  assert.match(await noAssets.res.text(), /ASSETS binding/);
+
+  const missingAsset = await call("/install.sh", { env: { ...TEST_ENV, ASSETS: staticAssets([]) } });
+  assert.equal(missingAsset.res.status, 404);
+  assert.equal(missingAsset.res.headers.get("cache-control"), "no-store");
 });
 
 // --- Asset Rendering --------------------------------------------------------
@@ -604,51 +672,27 @@ function withTempRender(overrides, fn) {
   }
 }
 
-test("render - Substitutes __GITHUB_REPO__ and __REPO_ORIGIN__ across index.html, install.sh and kvrocks.repo", () => {
-  withTempRender(
-    { GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: "https://repo.example.com/" },
-    ({ outDir, devVarsPath }) => {
-      const result = render({ outDir, devVarsPath });
-      assert.deepEqual(result, { slug: TEST_REPO, origin: "https://repo.example.com" });
-
-      const html = readFileSync(join(outDir, "index.html"), "utf8");
-      const installer = readFileSync(join(outDir, "install.sh"), "utf8");
-      const repoConfig = readFileSync(join(outDir, "kvrocks.repo"), "utf8");
-
-      for (const content of [html, installer, repoConfig]) {
-        assert.equal(content.includes("__GITHUB_REPO__"), false);
-        assert.equal(content.includes("__REPO_ORIGIN__"), false);
-      }
-
-      assert.equal(html.includes(`https://github.com/${TEST_REPO}`), true);
-      assert.equal(html.includes("https://repo.example.com"), true);
-      assert.equal(installer.includes('REPO_ORIGIN="https://repo.example.com"'), true);
-      assert.equal(repoConfig.includes("baseurl=https://repo.example.com/rpm/stable/$basearch/"), true);
-      assert.equal(repoConfig.includes("baseurl=https://repo.example.com/rpm/testing/$basearch/"), true);
-      assert.equal(repoConfig.includes("gpgkey=https://repo.example.com/kvrocks.asc"), true);
-      assert.equal(readFileSync(devVarsPath, "utf8"), `GITHUB_REPO=${TEST_REPO}\n`);
-    }
-  );
-});
-
-test("render - Leaves __REPO_ORIGIN__ unrendered when KVROCKS_GATEWAY_URL is unset", () => {
-  withTempRender({ GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: undefined }, ({ outDir, devVarsPath }) => {
+test("render - Substitutes __GITHUB_REPO__ in index.html while preserving __REPO_ORIGIN__ templates", () => {
+  withTempRender({ GITHUB_REPOSITORY: TEST_REPO }, ({ outDir, devVarsPath }) => {
     const result = render({ outDir, devVarsPath });
-    assert.deepEqual(result, { slug: TEST_REPO, origin: null });
+    assert.deepEqual(result, { slug: TEST_REPO });
 
     const html = readFileSync(join(outDir, "index.html"), "utf8");
     const installer = readFileSync(join(outDir, "install.sh"), "utf8");
     const repoConfig = readFileSync(join(outDir, "kvrocks.repo"), "utf8");
 
     assert.equal(html.includes("__GITHUB_REPO__"), false);
-    assert.equal(html.includes("__REPO_ORIGIN__"), true);
+    assert.equal(html.includes("__REPO_ORIGIN__"), false);
+    assert.equal(html.includes(`https://github.com/${TEST_REPO}`), true);
+    assert.equal(html.includes("window.location.origin"), true);
     assert.equal(installer.includes('REPO_ORIGIN="__REPO_ORIGIN__"'), true);
     assert.equal(repoConfig.includes("baseurl=__REPO_ORIGIN__/rpm/stable/$basearch/"), true);
+    assert.equal(readFileSync(devVarsPath, "utf8"), `GITHUB_REPO=${TEST_REPO}\n`);
   });
 });
 
 test("render - Preserves existing keys in .dev.vars while updating GITHUB_REPO", () => {
-  withTempRender({ GITHUB_REPOSITORY: TEST_REPO, KVROCKS_GATEWAY_URL: undefined }, ({ outDir, devVarsPath }) => {
+  withTempRender({ GITHUB_REPOSITORY: TEST_REPO }, ({ outDir, devVarsPath }) => {
     writeFileSync(devVarsPath, "# local secrets\nGITHUB_TOKEN=ghp_secret\nGITHUB_REPO=old/repo\nMETADATA_ORIGIN=https://custom.example.com\n");
     render({ outDir, devVarsPath });
 
@@ -657,19 +701,4 @@ test("render - Preserves existing keys in .dev.vars while updating GITHUB_REPO",
       `# local secrets\nGITHUB_TOKEN=ghp_secret\nGITHUB_REPO=${TEST_REPO}\nMETADATA_ORIGIN=https://custom.example.com\n`
     );
   });
-});
-
-test("deploy - Exits non-zero when KVROCKS_GATEWAY_URL is unset", () => {
-  const gatewayDir = dirname(dirname(fileURLToPath(import.meta.url)));
-  const env = { ...process.env, GITHUB_REPOSITORY: TEST_REPO };
-  delete env.KVROCKS_GATEWAY_URL;
-
-  const res = spawnSync(process.execPath, [join(gatewayDir, "scripts/deploy.mjs")], {
-    cwd: gatewayDir,
-    env,
-    encoding: "utf8",
-  });
-
-  assert.notEqual(res.status, 0);
-  assert.match(res.stderr, /KVROCKS_GATEWAY_URL must be set/);
 });

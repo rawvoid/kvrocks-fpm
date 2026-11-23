@@ -54,9 +54,9 @@ curl -fsSL https://<gateway-origin>/install.sh | sudo bash
 curl -fsSL https://<gateway-origin>/install.sh | sudo KVROCKS_CHANNEL=testing bash
 ```
 
-The installer installs from the repository origin baked in at deploy time, so it needs nothing from
-the machine it runs on. When the script has been copied off that origin, set `KVROCKS_REPO_URL` to the
-repository origin before running it.
+The gateway Worker fills its own origin into `install.sh` when serving it, so a downloaded script
+already points at that gateway even if copied to another machine. Only when running an unrendered
+copy straight from a git checkout should `KVROCKS_REPO_URL` be set to the repository origin.
 
 Same-name upgrades use `try-restart`: running services are restarted, stopped services stay stopped, and boot enablement is unchanged. Debian service operations honor `policy-rc.d`; a failed service operation never aborts the package transaction.
 
@@ -180,9 +180,9 @@ New upstream Apache Kvrocks tags (both GA releases and `-rc` pre-releases) are a
 
 Publishing creates a draft GitHub Release, makes it public, and then deploys metadata to `gh-pages`. Metadata is pushed once; a failure stops the workflow without retrying, deleting, or re-creating the public Release.
 
-`gh-pages` holds domain-independent repository metadata only (`dists/`, `rpm/`, `kvrocks.gpg`, `kvrocks.asc`, `.nojekyll`); the workflow audits that whitelist before committing. The landing page, the installer and `kvrocks.repo` are static assets of the edge gateway Worker and ship through `.github/workflows/gateway.yaml`, independently of releases.
+`gh-pages` holds domain-independent repository metadata only (`dists/`, `rpm/`, `kvrocks.gpg`, `kvrocks.asc`, `.nojekyll`); the workflow audits that whitelist before committing. The landing page, stylesheet, installer and `kvrocks.repo` ship with the edge gateway Worker through `.github/workflows/gateway.yaml`, independently of releases.
 
-Repository requirements: the `gh-pages` branch is created on the first run when it does not exist yet, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key (`KVROCKS_GATEWAY_URL` is only needed when deploying the edge gateway). RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
+Repository requirements: the `gh-pages` branch is created on the first run when it does not exist yet, and secret `GPG_PRIVATE_KEY` (plus optional `GPG_PASSPHRASE`) must hold exactly one signing key. RPM metadata is built with `mergerepo_c --omit-baseurl`, so package locations stay filenames under the repository `baseurl`.
 
 **Pre-release versions**: `2.15.0-rc1` packages are built with internal package version `2.15.0~rc1` (the `~` ensures APT/DNF recognize that `2.15.0~rc1 < 2.15.0`, so upgrading to the GA release is seamless when both versions are visible to the package manager). The installer always configures the stable APT channel and adds testing when selected, so testing users can see later GA releases. The suffix is a single identifier such as `rc1` or `rc.1`; a hyphen is rejected because RPM `Version` cannot contain `-`. External artifacts and release tags retain the standard naming (e.g. `kvrocks_2.15.0-rc1-1_amd64.deb`, tag `v2.15.0-rc1-1`).
 

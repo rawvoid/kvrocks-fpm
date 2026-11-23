@@ -529,7 +529,7 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         channel: 'stable',
         installTab: 'quick',
         copiedId: null,
-        repoOrigin: /^https?:\/\//.test('__REPO_ORIGIN__') ? '__REPO_ORIGIN__' : window.location.origin,
+        repoOrigin: window.location.origin,
         releases: [],
         expandedReleases: [],
         loading: true,

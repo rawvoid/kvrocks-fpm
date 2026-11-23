@@ -6,8 +6,8 @@
 # Usage (the landing page prints this command for the right host):
 #   curl -fsSL https://<gateway-origin>/install.sh | sudo bash
 #
-# The script installs from the repository origin baked in below at build time. When it is copied away
-# from that origin, set KVROCKS_REPO_URL to the repository origin before running it.
+# The script installs from the repository origin filled in when served by the gateway. When running an
+# unrendered copy straight from a git checkout, set KVROCKS_REPO_URL to the repository origin.
 #
 
 set -euo pipefail
@@ -20,9 +20,8 @@ cleanup_tmp_files() {
 }
 trap cleanup_tmp_files EXIT
 
-# Filled in by `scripts/render.mjs` from the KVROCKS_GATEWAY_URL repository variable, so the installer
-# carries no host of its own and a fork needs no edit: the origin always matches the repository the
-# packages come from.
+# Filled in by the gateway Worker from the request origin when /install.sh is served, so the installer
+# carries no hardcoded host and works across any domain or fork without configuration.
 REPO_ORIGIN="__REPO_ORIGIN__"
 
 # Visual formatting (disabled if not in a terminal or NO_COLOR is set)
@@ -108,12 +107,12 @@ resolve_repo_url() {
         return 0
     fi
 
-    # 2. Otherwise use the origin baked in at build time. A bare placeholder means this build was made
-    #    without KVROCKS_GATEWAY_URL, so there is nothing to resolve against.
+    # 2. Otherwise use the origin filled in when served by the gateway. A bare placeholder means this
+    #    copy was taken straight from the source tree without going through the gateway.
     case "${REPO_ORIGIN}" in
         http://* | https://*) echo "${REPO_ORIGIN%/}" ;;
         *)
-            error "This installer was not built with a repository origin. Download it from the repository gateway, or set KVROCKS_REPO_URL to the repository origin."
+            error "Repository origin is not set. Download install.sh from the repository gateway, or set KVROCKS_REPO_URL to the repository origin."
             ;;
     esac
 }
