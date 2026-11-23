@@ -558,7 +558,9 @@ jobs:
       - name: Move onto the GitHub Pages Branch
         working-directory: pages
         run: |
-          if git fetch --depth 1 origin gh-pages; then
+          remote_head=$(git ls-remote --heads origin refs/heads/gh-pages)
+          if [ -n "$remote_head" ]; then
+            git fetch --depth 1 origin gh-pages
             git checkout --quiet -B gh-pages FETCH_HEAD
           else
             git checkout --quiet --orphan gh-pages
