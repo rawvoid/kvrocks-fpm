@@ -235,10 +235,18 @@ For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or co
     CPU_DETAIL="Standard (${ARCH})"
 
     if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "x86_64" ]; then
-        # Check if host CPU supports x86-64-v3 plus pclmulqdq (-march=x86-64-v3 -mpclmul)
-        if grep -qw "avx2" /proc/cpuinfo 2>/dev/null && \
-           grep -qw "bmi2" /proc/cpuinfo 2>/dev/null && \
-           grep -qw "pclmulqdq" /proc/cpuinfo 2>/dev/null; then
+        # Check full x86-64-v3 (including x86-64-v2 baseline) plus pclmulqdq (-march=x86-64-v3 -mpclmul)
+        if awk '
+            /^flags[[:space:]]*:/ {
+                sub(/^[^:]*:/, "")
+                for (i = 1; i <= NF; i++) f[$i] = 1
+                n = split("cx16 lahf_lm popcnt ssse3 sse4_1 sse4_2 avx avx2 bmi1 bmi2 f16c fma abm movbe xsave pclmulqdq", req)
+                ok = (f["pni"] || f["sse3"])
+                for (i = 1; i <= n; i++) if (!f[req[i]]) ok = 0
+                exit
+            }
+            END { exit !ok }
+        ' /proc/cpuinfo 2>/dev/null; then
             TARGET_PACKAGE="kvrocks"
             CPU_DETAIL="Optimized (x86-64-v3 / AVX2 & BMI2)"
         else
