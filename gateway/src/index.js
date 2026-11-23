@@ -14,6 +14,7 @@ import { textResponse } from "./shared.js";
 import { checkAndDispatchRelease } from "./watcher.js";
 
 const REPO_ORIGIN_PLACEHOLDER = "__REPO_ORIGIN__";
+const SAFE_ORIGIN_RE = /^https?:\/\/(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::[0-9]+)?$/i;
 const UTF8_ENCODER = new TextEncoder();
 
 function isTemplatePath(pathname) {
@@ -21,6 +22,9 @@ function isTemplatePath(pathname) {
 }
 
 async function handleTemplate(request, env, origin, pathname) {
+  if (!SAFE_ORIGIN_RE.test(origin)) {
+    return textResponse("Bad Request: invalid request origin", 400, { "Cache-Control": "no-store" });
+  }
   if (!env.ASSETS?.fetch) {
     return textResponse("Gateway Misconfiguration: ASSETS binding must be configured.", 500);
   }
@@ -31,7 +35,7 @@ async function handleTemplate(request, env, origin, pathname) {
     return textResponse("Not Found", 404, { "Cache-Control": "no-store" });
   }
 
-  const rendered = (await asset.text()).replaceAll(REPO_ORIGIN_PLACEHOLDER, origin);
+  const rendered = (await asset.text()).replaceAll(REPO_ORIGIN_PLACEHOLDER, () => origin);
   const bytes = UTF8_ENCODER.encode(rendered);
   return new Response(request.method === "HEAD" ? null : bytes, {
     status: 200,

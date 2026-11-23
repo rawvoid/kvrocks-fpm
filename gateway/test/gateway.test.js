@@ -591,7 +591,7 @@ test("worker.fetch - Conditional headers never turn errors into 304", async () =
 // --- Request-Origin Templates ----------------------------------------------
 
 test("worker.fetch - Templates (/install.sh, /kvrocks.repo) substitute request origin without touching upstream", async () => {
-  for (const origin of ["https://kvrocks-repo.example.com", "https://mirror.example.org:8443"]) {
+  for (const origin of ["https://kvrocks-repo.example.com", "https://mirror.example.org:8443", "http://[::1]:8787"]) {
     for (const path of ["/install.sh", "/kvrocks.repo"]) {
       const assets = staticAssets();
       const { res, fetchCalls } = await call(`${path}?v=1`, {
@@ -645,6 +645,21 @@ test("worker.fetch - Missing ASSETS binding or missing template returns fail-fas
   const missingAsset = await call("/install.sh", { env: { ...TEST_ENV, ASSETS: staticAssets([]) } });
   assert.equal(missingAsset.res.status, 404);
   assert.equal(missingAsset.res.headers.get("cache-control"), "no-store");
+});
+
+test("worker.fetch - Template requests reject unsafe origins with 400 without invoking ASSETS", async () => {
+  for (const origin of ["https://a`id`.example.com", 'https://a"b.example.com', "https://a$&b.example.com"]) {
+    const assets = staticAssets();
+    const { res, fetchCalls } = await call("/install.sh", {
+      origin,
+      env: { ...TEST_ENV, ASSETS: assets },
+    });
+
+    assert.equal(res.status, 400, origin);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+    assert.equal(assets.requests.length, 0);
+    assert.equal(fetchCalls.length, 0);
+  }
 });
 
 // --- Asset Rendering --------------------------------------------------------
