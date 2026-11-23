@@ -496,6 +496,10 @@
             <svg x-show="loadingMore" class="w-4 h-4 animate-spin text-brand-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
             <span x-text="loadingMore ? 'Loading older releases...' : 'Load Older Releases ▾'"></span>
           </button>
+          <p x-show="loadMoreError" x-cloak class="mt-2.5 text-xs text-amber-600 dark:text-amber-400">
+            Failed to load older releases. Click above to retry, or browse directly on
+            <a href="https://github.com/__GITHUB_REPO__/releases" target="_blank" rel="noopener noreferrer" class="underline hover:text-amber-700 dark:hover:text-amber-300">GitHub Releases</a>.
+          </p>
         </div>
 
         <div class="pt-4 text-center" x-show="!hasMore && releases.length > 0">
@@ -609,6 +613,7 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         perPage: 5,
         hasMore: true,
         loadingMore: false,
+        loadMoreError: false,
 
         init() {
           this.applyTheme(this.darkMode);
@@ -699,7 +704,7 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
             return [
               '# 1. Import repository GPG key',
               `sudo install -m 0755 -d ${keyringDir}`,
-              `curl -fsSL ${origin}/kvrocks.gpg | sudo tee ${keyring} > /dev/null`,
+              `sudo curl -fsSL ${origin}/kvrocks.gpg -o ${keyring}`,
               `sudo chmod 0644 ${keyring}`,
               '',
               '# 2. Add repository source',
@@ -780,12 +785,14 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
         async loadMoreReleases() {
           if (this.loadingMore || !this.hasMore) return;
           this.loadingMore = true;
+          this.loadMoreError = false;
           try {
-            this.page++;
-            const res = await fetch(`https://api.github.com/repos/__GITHUB_REPO__/releases?per_page=${this.perPage}&page=${this.page}`);
+            const nextPage = this.page + 1;
+            const res = await fetch(`https://api.github.com/repos/__GITHUB_REPO__/releases?per_page=${this.perPage}&page=${nextPage}`);
             if (!res.ok) throw new Error('API fetch failed');
             const data = await res.json();
             if (!Array.isArray(data)) throw new Error('Invalid response payload');
+            this.page = nextPage;
             const valid = data.filter(r => !r.draft);
             if (valid.length > 0) {
               const existingIds = new Set(this.releases.map(r => r.id));
@@ -799,7 +806,7 @@ rpm -qi gpg-pubkey | grep -E 'Summary|Version'</code></pre>
               this.hasMore = false;
             }
           } catch (err) {
-            this.hasMore = false;
+            this.loadMoreError = true;
           } finally {
             this.loadingMore = false;
           }
