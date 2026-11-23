@@ -27,6 +27,7 @@ gateway/
 │   ├── install.sh       # installer, carries __REPO_ORIGIN__
 │   ├── kvrocks.repo     # DNF repo config, carries __REPO_ORIGIN__
 │   ├── favicon.svg      # tab icon, referenced as /favicon.svg
+│   ├── styles.css       # precompiled Tailwind stylesheet, referenced as /styles.css
 │   └── _headers         # per-asset headers & caching rules, consumed by the edge
 ├── dist/                # rendered assets, uploaded with the Worker (generated)
 └── .dev.vars            # local GITHUB_REPO for `wrangler dev` (generated)
@@ -50,6 +51,7 @@ without invoking the Worker**, everything else reaches `src/index.js`.
 | `/install.sh` | static asset | The whole script is fixed at build time; no Worker code runs |
 | `/kvrocks.repo` | static asset | DNF repo config fixed at build time; `_headers` sets `text/plain` |
 | `/favicon.svg` | static asset | `_headers` gives it `max-age=86400`; the page itself stays revalidated by `ETag` |
+| `/styles.css` | static asset | Precompiled stylesheet, revalidated by `ETag` |
 | `/pool/*.deb`, `/rpm/**/*.rpm` | Worker | Streamed from GitHub Releases, cached one year per asset |
 | everything else (`/dists/**`, `/rpm/**/repodata/**`, `kvrocks.{gpg,asc}`) | Worker | Proxied from the metadata origin (GitHub Pages) with per-type TTLs |
 
