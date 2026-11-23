@@ -124,7 +124,8 @@ jobs:
               exit 1
             fi
             echo "Note: Found draft release ${RELEASE_TAG}; it will be replaced during publish."
-          elif git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
             echo "::error::Git tag ${RELEASE_TAG} already exists on remote. Bump the iteration."
             exit 1
           fi
@@ -774,7 +775,7 @@ jobs:
               exit 1
             fi
             echo "Removing stale draft release ${RELEASE_TAG}..."
-            gh release delete "$RELEASE_TAG" --cleanup-tag --yes
+            gh release delete "$RELEASE_TAG" --yes
           fi
           gh release create "$RELEASE_TAG" "${args[@]}" dist/*
 
