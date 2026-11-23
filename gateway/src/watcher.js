@@ -20,12 +20,11 @@ const UTF8_DECODER = new TextDecoder();
 // Matches the upstream version syntax accepted by .github/workflows/release.yaml (e.g. 2.17.0, 2.17.0-rc1).
 const VERSION_CORE = "[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+(?:\\.[0-9A-Za-z]+)*)?";
 const UPSTREAM_VERSION_RE = /^([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*))?$/;
-const UPSTREAM_TAG_RE = new RegExp(`^(?:refs/tags/)?v(${VERSION_CORE})$`);
-const LOOSE_UPSTREAM_TAG_RE = /^(?:refs\/tags\/)?v([0-9]+\.[0-9]+\.[0-9]+)(?:[^0-9].*)$/;
-const PACKAGED_TAG_RE = new RegExp(`^(?:refs/tags/)?v(${VERSION_CORE})-[1-9][0-9]*$`);
+const UPSTREAM_TAG_RE = new RegExp(`^v(${VERSION_CORE})$`);
+const LOOSE_UPSTREAM_TAG_RE = /^v([0-9]+\.[0-9]+\.[0-9]+)[^0-9].*$/;
+const PACKAGED_TAG_RE = new RegExp(`^v(${VERSION_CORE})-[1-9][0-9]*$`);
 // Deliberately excludes `(dry-run)` run titles so dry runs never suppress an automated release.
 const RELEASE_RUN_TITLE_RE = new RegExp(`^Release vv?(${VERSION_CORE})-[1-9][0-9]*$`);
-const RELEASE_RUN_ANY_TITLE_RE = /^Release vv?(.+)-[1-9][0-9]*$/;
 
 function parseVersion(version) {
   const match = String(version ?? "").match(UPSTREAM_VERSION_RE);
@@ -109,16 +108,11 @@ export function compareVersions(a, b) {
   return Math.sign(tokensA.length - tokensB.length);
 }
 
-function getTagText(item) {
-  if (typeof item === "string") return item;
-  return item?.tag_name ?? item?.name ?? item?.ref ?? "";
-}
-
-function extractVersions(items, regex, getText = getTagText) {
+function extractVersions(items, regex) {
   if (!Array.isArray(items)) return [];
   const versions = new Set();
   for (const item of items) {
-    const match = String(getText(item) ?? "").match(regex);
+    const match = String(item?.name ?? "").match(regex);
     if (match) versions.add(match[1]);
   }
   return [...versions].sort(compareVersions);
@@ -218,21 +212,21 @@ export function parseGitLsRefs(input) {
 }
 
 /**
- * Selects the next upstream Kvrocks version to dispatch to `release.yaml` (at most one per tick).
+ * Evaluates pending upstream releases and returns dispatch decisions plus watcher diagnostics.
  *
  * - Waits whenever any non-dry-run workflow run is still active (`status !== "completed"`).
- * - Considers all upstream tags `>= minVersion`, dropping superseded RCs (Strategy A) and
- *   subtracting all locally published packaged tags (`v<version>-<iteration>`).
+ * - Considers all upstream tags `>= minVersion`, dropping superseded RCs and subtracting all
+ *   locally published packaged tags (`v<version>-<iteration>`).
  * - Locks strictly onto the oldest missing version (`head = missingVersions[0]`) without ever
  *   skipping ahead; retries `head` up to `maxAttempts` completed non-dry-run runs before halting.
- * - Only when no valid version is missing, surfaces an unrecognized version-like upstream tag
- *   (`>= minVersion`) once to trigger `release.yaml` preflight notification.
+ * - Records version-like upstream tags (`>= minVersion`) that do not match packaging syntax in
+ *   `skippedTags` until their base GA version appears, without dispatching or blocking valid tags.
  *
- * @param {Array<string|{name?: string, ref?: string}>} upstreamTags Full upstream Git tags
- * @param {Array<string|{tag_name?: string, draft?: boolean, ref?: string, name?: string}>} packagedTags Full local packaged tags
+ * @param {Array<{name?: string}>} upstreamTags Full upstream Git tags
+ * @param {Array<{name?: string}>} packagedTags Full local packaged tags
  * @param {Array<{status?: string, display_title?: string}>} [workflowRuns=[]] Recent release.yaml runs
  * @param {{minVersion?: string, maxAttempts?: number|string}} [options={}] Watcher thresholds
- * @returns {string[]} Zero or one version to dispatch (without leading "v")
+ * @returns {{versions: string[], skippedTags: string[], activeRun?: string, emptyUpstream?: boolean, halted?: boolean, head?: string, attempts?: number}}
  */
 function evaluatePendingRelease(
   upstreamTags,
@@ -243,27 +237,31 @@ function evaluatePendingRelease(
   const minVersion = normalizeMinVersion(options?.minVersion);
   const maxAttempts = normalizeMaxAttempts(options?.maxAttempts);
 
-  const invalidTags = [];
-  const seenInvalid = new Set();
+  const upstreamValid = extractVersions(upstreamTags, UPSTREAM_TAG_RE).filter(
+    (version) => compareVersions(version, minVersion) >= 0
+  );
+  const upstreamValidSet = new Set(upstreamValid);
+
+  const skippedEntries = [];
+  const seenSkipped = new Set();
   if (Array.isArray(upstreamTags)) {
     for (const item of upstreamTags) {
-      const rawName = String(getTagText(item) ?? "").replace(/^refs\/tags\//, "");
-      if (!rawName || UPSTREAM_TAG_RE.test(rawName)) continue;
+      const name = String(item?.name ?? "");
+      if (!name || UPSTREAM_TAG_RE.test(name) || seenSkipped.has(name)) continue;
 
-      const looseMatch = rawName.match(LOOSE_UPSTREAM_TAG_RE);
-      if (!looseMatch || compareVersions(looseMatch[1], minVersion) < 0) continue;
+      const looseMatch = name.match(LOOSE_UPSTREAM_TAG_RE);
+      if (!looseMatch) continue;
+      const base = looseMatch[1];
+      if (compareVersions(base, minVersion) < 0 || upstreamValidSet.has(base)) continue;
 
-      const raw = rawName.replace(/^v/, "");
-      if (raw && !seenInvalid.has(raw)) {
-        seenInvalid.add(raw);
-        invalidTags.push({ base: looseMatch[1], raw });
-      }
+      seenSkipped.add(name);
+      skippedEntries.push({ base, name });
     }
-    invalidTags.sort(
-      (a, b) => compareVersions(a.base, b.base) || a.raw.localeCompare(b.raw)
+    skippedEntries.sort(
+      (a, b) => compareVersions(a.base, b.base) || a.name.localeCompare(b.name)
     );
   }
-  const invalidTagNames = invalidTags.map((item) => item.raw);
+  const skippedTags = skippedEntries.map((entry) => entry.name);
 
   const runs = Array.isArray(workflowRuns) ? workflowRuns : [];
   const nonDryRuns = runs.filter(
@@ -275,38 +273,26 @@ function evaluatePendingRelease(
   if (activeRun) {
     return {
       versions: [],
-      invalidTags: invalidTagNames,
+      skippedTags,
       activeRun: String(activeRun.display_title || activeRun.status),
     };
   }
 
   if (!Array.isArray(upstreamTags) || upstreamTags.length === 0) {
-    return { versions: [], invalidTags: invalidTagNames, emptyUpstream: true };
+    return { versions: [], skippedTags: [], emptyUpstream: true };
   }
 
-  const nonDraftPackaged = Array.isArray(packagedTags)
-    ? packagedTags.filter((item) => typeof item === "string" || !item?.draft)
-    : [];
-  const packagedSet = new Set(extractVersions(nonDraftPackaged, PACKAGED_TAG_RE, getTagText));
+  const packagedSet = new Set(extractVersions(packagedTags, PACKAGED_TAG_RE));
 
   const attemptCounts = new Map();
-  const dispatchedRawVersions = new Set();
   for (const run of nonDryRuns) {
-    const title = String(run?.display_title ?? "");
-    const validMatch = title.match(RELEASE_RUN_TITLE_RE);
-    if (validMatch) {
-      const version = validMatch[1];
+    const match = String(run?.display_title ?? "").match(RELEASE_RUN_TITLE_RE);
+    if (match) {
+      const version = match[1];
       attemptCounts.set(version, (attemptCounts.get(version) ?? 0) + 1);
-    }
-    const anyMatch = title.match(RELEASE_RUN_ANY_TITLE_RE);
-    if (anyMatch) {
-      dispatchedRawVersions.add(anyMatch[1]);
     }
   }
 
-  const upstreamValid = extractVersions(upstreamTags, UPSTREAM_TAG_RE, getTagText).filter(
-    (version) => compareVersions(version, minVersion) >= 0
-  );
   const targetVersions = dropSupersededPrereleases(upstreamValid);
   const missingVersions = targetVersions.filter((version) => !packagedSet.has(version));
 
@@ -316,17 +302,22 @@ function evaluatePendingRelease(
     const head = missingVersions[0];
     const attempts = attemptCounts.get(head) ?? 0;
     return attempts < maxAttempts
-      ? { versions: [head], invalidTags: invalidTagNames, head, attempts }
-      : { versions: [], invalidTags: invalidTagNames, halted: true, head, attempts };
+      ? { versions: [head], skippedTags, head, attempts }
+      : { versions: [], skippedTags, halted: true, head, attempts };
   }
 
-  const nextInvalid = invalidTagNames.find((raw) => !dispatchedRawVersions.has(raw));
-  return {
-    versions: nextInvalid ? [nextInvalid] : [],
-    invalidTags: invalidTagNames,
-  };
+  return { versions: [], skippedTags };
 }
 
+/**
+ * Selects the next upstream Kvrocks version to dispatch to `release.yaml` (at most one per tick).
+ *
+ * @param {Array<{name?: string}>} upstreamTags Full upstream Git tags
+ * @param {Array<{name?: string}>} packagedTags Full local packaged tags
+ * @param {Array<{status?: string, display_title?: string}>} [workflowRuns=[]] Recent release.yaml runs
+ * @param {{minVersion?: string, maxAttempts?: number|string}} [options={}] Watcher thresholds
+ * @returns {string[]} Zero or one version to dispatch (without leading "v")
+ */
 export function selectPendingReleaseVersions(
   upstreamTags,
   packagedTags,
@@ -415,15 +406,12 @@ export async function checkAndDispatchRelease(env) {
     ).then((res) => res.json()),
   ]);
 
-  const { versions, invalidTags, activeRun, emptyUpstream, halted, head, attempts } =
+  const { versions, skippedTags, activeRun, emptyUpstream, halted, head, attempts } =
     evaluatePendingRelease(upstreamTags, packagedTags, runsData?.workflow_runs ?? [], {
       minVersion,
       maxAttempts,
     });
 
-  if (invalidTags.length > 0) {
-    console.warn(JSON.stringify({ event: "watcher.invalid_tags", upstreamRepo, githubRepo, invalidTags }));
-  }
   if (emptyUpstream) {
     console.warn(JSON.stringify({ event: "watcher.empty_upstream", upstreamRepo, githubRepo }));
   }
@@ -456,6 +444,7 @@ export async function checkAndDispatchRelease(env) {
       maxAttempts,
       dispatched,
       versions,
+      ...(skippedTags.length > 0 ? { skippedTags } : {}),
       ...(activeRun ? { activeRun } : {}),
     })
   );

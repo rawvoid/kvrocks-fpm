@@ -207,7 +207,7 @@ test("selectPendingReleaseVersions - Brand-new repo dispatches oldest missing GA
   assert.deepEqual(selectPendingReleaseVersions(upstream, packaged, []), []);
 });
 
-test("selectPendingReleaseVersions - Tracks active RCs sequentially through GA (Strategy A)", () => {
+test("selectPendingReleaseVersions - Tracks active RCs sequentially through GA", () => {
   const basePackaged = [{ name: "v2.17.0-1" }];
   const baseUpstream = [{ name: "v2.17.0" }];
 
@@ -383,18 +383,7 @@ test("selectPendingReleaseVersions - Retries head up to MAX_ATTEMPTS then halts 
   );
 });
 
-test("selectPendingReleaseVersions - Surfaces unrecognized >= MIN_VERSION tags once without blocking valid releases", () => {
-  // Valid pending versions are never blocked by malformed tags (including on brand-new repos)
-  assert.deepEqual(
-    selectPendingReleaseVersions(
-      [{ name: "v2.18.0-alpha-1" }, { name: "v2.17.0" }],
-      [],
-      []
-    ),
-    ["2.17.0"]
-  );
-
-  // Once all valid versions are packaged, unrecognized >= MIN_VERSION tag is surfaced once
+test("selectPendingReleaseVersions - Ignores unrecognized or malformed upstream tags without blocking valid releases", () => {
   const upstreamWithBadTag = [
     { name: "v2.17.0" },
     { name: "v2.18.0-alpha-1" },
@@ -402,34 +391,13 @@ test("selectPendingReleaseVersions - Surfaces unrecognized >= MIN_VERSION tags o
     { name: "v.1.1.2" },
     { name: "nightly" },
   ];
-  const packaged217 = [{ name: "v2.17.0-1" }];
-  assert.deepEqual(
-    selectPendingReleaseVersions(upstreamWithBadTag, packaged217, []),
-    ["2.18.0-alpha-1"]
-  );
 
-  // Never retried once a non-dry-run workflow run has occurred (even with double "v")
-  assert.deepEqual(
-    selectPendingReleaseVersions(upstreamWithBadTag, packaged217, [
-      { status: "completed", conclusion: "failure", display_title: "Release v2.18.0-alpha-1-1" },
-    ]),
-    []
-  );
-  assert.deepEqual(
-    selectPendingReleaseVersions(upstreamWithBadTag, packaged217, [
-      { status: "completed", conclusion: "failure", display_title: "Release vv2.18.0-alpha-1-1" },
-    ]),
-    []
-  );
+  // Valid pending versions are never blocked by malformed tags (including on brand-new repos)
+  assert.deepEqual(selectPendingReleaseVersions(upstreamWithBadTag, [], []), ["2.17.0"]);
 
-  // Malformed tags are NOT dispatched while a valid head version is halted at maxAttempts
-  const failed217 = { status: "completed", conclusion: "failure", display_title: "Release v2.17.0-1" };
+  // Once valid versions are packaged, unrecognized tags are still ignored (never dispatched)
   assert.deepEqual(
-    selectPendingReleaseVersions(
-      [{ name: "v2.17.0" }, { name: "v2.18.0-alpha-1" }],
-      [],
-      [failed217, failed217, failed217]
-    ),
+    selectPendingReleaseVersions(upstreamWithBadTag, [{ name: "v2.17.0-1" }], []),
     []
   );
 });
@@ -654,15 +622,19 @@ test("worker.scheduled - Rejects on GitHub HTTP error, invalid pkt-line response
   );
 });
 
-test("worker.scheduled - Logs warnings/errors for invalid upstream tags, empty feed, and halted head", async () => {
+test("worker.scheduled - Reports skippedTags in watcher log and logs warnings/errors for empty feed and halted head", async () => {
+  const originalLog = console.log;
   const originalWarn = console.warn;
   const originalError = console.error;
+  const logs = [];
   const warnings = [];
   const errors = [];
+  console.log = (msg) => logs.push(JSON.parse(msg));
   console.warn = (msg) => warnings.push(JSON.parse(msg));
   console.error = (msg) => errors.push(JSON.parse(msg));
 
   try {
+    // Uncovered invalid tag >= MIN_VERSION appears in watcher log as skippedTags without warning
     await runScheduled({
       fetchImpl: (url, init) => {
         if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
@@ -670,6 +642,22 @@ test("worker.scheduled - Logs warnings/errors for invalid upstream tags, empty f
         }
         if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
           return new Response("0000");
+        }
+        if (url.endsWith("/dispatches") && init?.method === "POST") {
+          return new Response(null, { status: 204 });
+        }
+        return Response.json({ workflow_runs: [] });
+      },
+    });
+
+    // Once base GA tag (v2.18.0) exists upstream, skippedTags omits v2.18.0-alpha-1
+    await runScheduled({
+      fetchImpl: (url, init) => {
+        if (url === "https://github.com/apache/kvrocks.git/git-upload-pack") {
+          return new Response(lsRefsBody(["v2.17.0", "v2.18.0-alpha-1", "v2.18.0"]));
+        }
+        if (url === `https://github.com/${TEST_REPO}.git/git-upload-pack`) {
+          return new Response(lsRefsBody(["v2.17.0-1"]));
         }
         if (url.endsWith("/dispatches") && init?.method === "POST") {
           return new Response(null, { status: 204 });
@@ -703,15 +691,19 @@ test("worker.scheduled - Logs warnings/errors for invalid upstream tags, empty f
       },
     });
   } finally {
+    console.log = originalLog;
     console.warn = originalWarn;
     console.error = originalError;
   }
 
+  assert.deepEqual(logs[0].versions, ["2.17.0"]);
+  assert.deepEqual(logs[0].skippedTags, ["v2.18.0-alpha-1"]);
+  assert.deepEqual(logs[1].versions, ["2.18.0"]);
+  assert.equal(logs[1].skippedTags, undefined);
   assert.deepEqual(
     warnings.map((w) => w.event),
-    ["watcher.invalid_tags", "watcher.empty_upstream"]
+    ["watcher.empty_upstream"]
   );
-  assert.deepEqual(warnings[0].invalidTags, ["2.18.0-alpha-1"]);
   assert.equal(errors[0].event, "watcher.halted");
   assert.equal(errors[0].head, "2.17.0");
 });
