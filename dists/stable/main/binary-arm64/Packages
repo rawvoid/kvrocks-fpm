@@ -69,3 +69,21 @@ Homepage: https://kvrocks.apache.org
 Description: Apache Kvrocks NoSQL database (Redis protocol, RocksDB, ARM64)
 License: Apache-2.0
 Vendor: rawvoid
+
+Package: kvrocks
+Version: 2.17.0-1
+Architecture: arm64
+Maintainer: rawvoid <rawvoid@users.noreply.github.com>
+Installed-Size: 36374
+Depends: libc6 (>= 2.35), libssl3 | libssl3t64, init-system-helpers
+Filename: pool/main/kvrocks_2.17.0-1_arm64.deb
+Size: 16224692
+MD5sum: 780e3fe4f0a5644aace334e457758b8b
+SHA1: acb1593354b443eed892e1c7251e9a8b94b39b9e
+SHA256: 1371bb9f7a6c74427d9062917ec36c715d7d7ac09bdd073855e1e901ded1f51c
+Section: database
+Priority: optional
+Homepage: https://kvrocks.apache.org
+Description: Apache Kvrocks NoSQL database (Redis protocol, RocksDB, ARM64)
+License: Apache-2.0
+Vendor: rawvoid
