@@ -202,7 +202,7 @@ EOF
         GLIBC_MINOR="$(echo "$HOST_GLIBC_VER" | cut -d. -f2)"
         if [ "$GLIBC_MAJOR" -lt 2 ] || { [ "$GLIBC_MAJOR" -eq 2 ] && [ "$GLIBC_MINOR" -lt 35 ]; }; then
             warn "Detected system GNU C Library (glibc) version: ${HOST_GLIBC_VER}"
-            error "Apache Kvrocks binary packages require glibc >= 2.35 (e.g. Fedora 36+, Ubuntu 22.04+, Debian 12+).
+            error "Apache Kvrocks binary packages require glibc >= 2.35 (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+, EL 10+).
 Enterprise Linux 8 and 9 (RHEL, CentOS Stream, Rocky Linux, AlmaLinux) provide glibc 2.28-2.34 and cannot run these binaries directly.
 For RHEL/Rocky 8 and 9 systems, please deploy Kvrocks via Docker/container or compile from source."
         fi

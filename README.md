@@ -39,9 +39,9 @@ Automated packaging pipeline that builds and distributes Debian (`.deb`) and Red
 > **Edge Acceleration & Unlimited Retention**: Package downloads are powered by our global Edge Gateway. All binary packages are permanently hosted on [GitHub Releases](../../releases) and cached globally at Cloudflare Edge nodes, providing fast downloads worldwide with zero storage restrictions. The landing page, the installer and the repository metadata are served from that same edge origin.
 
 > [!NOTE]
-> **System Requirements**: Requires Linux with `glibc >= 2.35` (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+). Older distributions without glibc 2.35 can run Kvrocks via Docker.
+> **System Requirements**: Requires Linux with `glibc >= 2.35` (e.g. Ubuntu 22.04+, Debian 12+, Fedora 36+, EL 10+). Older distributions without glibc 2.35 can run Kvrocks via Docker.
 
-### 1. One-Click Automated Install (Debian, Ubuntu, Fedora)
+### 1. One-Click Automated Install (Debian, Ubuntu, Fedora, EL 10+)
 
 The universal installer automatically detects your Linux distribution family, hardware architecture, and CPU capabilities (AVX2/BMI2), verifies glibc runtime compatibility (>= 2.35), configures the repository, and installs the fastest compatible package variant:
 
@@ -69,7 +69,7 @@ sudo systemctl enable kvrocks  # Only if previously enabled at boot
 
 To switch flavors manually via native package managers:
 - **Debian / Ubuntu**: `sudo apt install kvrocks` (or `kvrocks-legacy`)
-- **Fedora / DNF**: `sudo dnf swap kvrocks-legacy kvrocks` (or `kvrocks kvrocks-legacy`)
+- **Fedora / EL 10+ (DNF)**: `sudo dnf swap kvrocks-legacy kvrocks` (or `kvrocks kvrocks-legacy`)
 
 ---
 
